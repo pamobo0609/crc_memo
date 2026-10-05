@@ -1,7 +1,7 @@
 import pytest
 from typer.testing import CliRunner
 
-from crc_memo import config, ingest
+from crc_memo import config, ingest, transcribe
 from crc_memo.cli import app
 
 runner = CliRunner()
@@ -13,6 +13,19 @@ def isolated_data(memos_dir, monkeypatch):
     monkeypatch.setattr(config, "MEMOS_DIR", memos_dir)
 
 
+@pytest.fixture(autouse=True)
+def whisper_calls(monkeypatch):
+    """Fake Whisper for every CLI test: offline, fast, works on Linux."""
+    calls = []
+
+    def fake(wav, **options):
+        calls.append(options)
+        return {"language": "es", "segments": [{"start": 0.0, "end": 1.0, "text": " Pura vida."}]}
+
+    monkeypatch.setattr(transcribe, "_run_whisper", fake)
+    return calls
+
+
 def test_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
@@ -20,17 +33,42 @@ def test_help_lists_all_commands():
         assert command in result.output
 
 
-def test_process_ingests_then_skips(audio_files, memos_dir):
-    path = str(audio_files[".ogg"])
+def test_process_ingests_and_transcribes(audio_files, memos_dir):
+    result = runner.invoke(app, ["process", str(audio_files[".ogg"])])
 
-    first = runner.invoke(app, ["process", path])
-    assert first.exit_code == 0
-    assert "Ingested" in first.output
-    assert len(list(memos_dir.glob("*/audio.wav"))) == 1
+    assert result.exit_code == 0, result.output
+    assert "Ingested" in result.output
+    assert "Transcribed" in result.output
+    assert "language es" in result.output
+    (folder,) = memos_dir.iterdir()
+    assert (folder / "transcript.txt").read_text() == "[00:00] Pura vida.\n"
+
+
+def test_process_twice_skips_both_steps(audio_files, whisper_calls):
+    path = str(audio_files[".ogg"])
+    runner.invoke(app, ["process", path])
 
     second = runner.invoke(app, ["process", path])
     assert second.exit_code == 0
-    assert "Already processed" in second.output
+    assert "Already ingested" in second.output
+    assert "Already transcribed" in second.output
+    assert len(whisper_calls) == 1  # Whisper ran only the first time
+
+
+def test_process_lang_option(audio_files, whisper_calls):
+    result = runner.invoke(app, ["process", str(audio_files[".m4a"]), "--lang", "es"])
+    assert result.exit_code == 0
+    assert whisper_calls[0]["language"] == "es"
+
+
+def test_process_reports_transcription_error(audio_files, monkeypatch):
+    def broken(wav, **options):
+        raise transcribe.TranscribeError("mlx-whisper is not installed")
+
+    monkeypatch.setattr(transcribe, "_run_whisper", broken)
+    result = runner.invoke(app, ["process", str(audio_files[".m4a"])])
+    assert result.exit_code == 1
+    assert "mlx-whisper is not installed" in result.output
 
 
 def test_process_without_path_uses_picker(audio_files, memos_dir, monkeypatch):

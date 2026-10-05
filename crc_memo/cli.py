@@ -1,12 +1,13 @@
 """Command-line entry point. Commands are stubs until their phase lands."""
 
+import time
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
 
-from crc_memo import config, ingest
+from crc_memo import config, ingest, transcribe
 
 app = typer.Typer(
     help="Transcribe and summarize voice memos, locally.",
@@ -28,6 +29,11 @@ def process(
         dir_okay=False,
         readable=True,
     ),
+    lang: Optional[str] = typer.Option(
+        None,
+        "--lang",
+        help="Language code (es, en, ...). Default: auto-detect from the first 30 seconds.",
+    ),
 ) -> None:
     """Transcribe and summarize an audio file."""
     if path is None:
@@ -38,13 +44,36 @@ def process(
 
     try:
         result = ingest.ingest(path, config.MEMOS_DIR)
-    except ingest.IngestError as e:
+        status = "Already ingested" if result.skipped else "[green]Ingested[/green]"
+        console.print(f"{status} [bold]{result.memo_id}[/bold] → {result.folder}")
+        _transcribe_step(result.folder, lang)
+    except (ingest.IngestError, transcribe.TranscribeError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
 
-    status = "Already processed" if result.skipped else "[green]Ingested[/green]"
-    console.print(f"{status} [bold]{result.memo_id}[/bold] → {result.folder}")
-    _todo("Phase 2")
+    _todo("Phase 3")
+
+
+def _transcribe_step(folder: Path, lang: str | None) -> None:
+    """Each step skips work already done, so re-running a memo picks up where it left off."""
+    if transcribe.is_transcribed(folder):
+        console.print("Already transcribed")
+        return
+
+    wav = folder / ingest.WAV_NAME
+    length = transcribe.format_timestamp(transcribe.audio_duration(wav))
+    console.print(
+        f"Transcribing {length} of audio with [bold]{config.WHISPER_MODEL}[/bold]…\n"
+        "[dim](the first run downloads the model, ~1.6 GB)[/dim]"
+    )
+    started = time.monotonic()
+    result = transcribe.transcribe(wav, config.WHISPER_MODEL, lang, config.WHISPER_INITIAL_PROMPT)
+    transcribe.save(result, folder)
+    elapsed = transcribe.format_timestamp(time.monotonic() - started)
+    console.print(
+        f"[green]Transcribed[/green] in {elapsed} · language [bold]{result.language}[/bold] · "
+        f"{len(result.segments)} segments → {folder / transcribe.TRANSCRIPT_NAME}"
+    )
 
 
 @app.command("list")

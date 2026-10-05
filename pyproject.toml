@@ -5,6 +5,7 @@ description = "Local voice memo transcriber and summarizer for Costa Rican Spani
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "mlx-whisper>=0.4.3 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
     "ollama>=0.6.3",
     "rich>=15.0.0",
     "typer>=0.27.2",
@@ -30,4 +31,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Line + branch coverage of the app package; anything under 100% fails the run.
-addopts = "--cov=crc_memo --cov-branch --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=crc_memo --cov-branch --cov-report=term-missing --cov-fail-under=100 -m 'not integration'"
+# Opt-in: real models, slow, macOS-only. Run with: uv run pytest -m integration --no-cov
+markers = ["integration: real Whisper/ffmpeg end-to-end; skipped by default"]
