@@ -5,3 +5,4 @@ __pycache__/
 dcaa.pdf
 data/
 scripts/.cache/
+.claude/settings.local.json
