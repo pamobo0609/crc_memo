@@ -26,6 +26,9 @@ Project context (what crc_memo is, its stack and roadmap) lives in [CLAUDE.md](C
 4. **Tests are fast and offline.** Never touch the real `data/`, the network, Ollama or
    Whisper models — fake them with `monkeypatch`. Real `ffmpeg` is fine (local, fast,
    installed in CI).
+   - **Exception: opt-in integration tests** (`@pytest.mark.integration`, in
+     `tests/integration/`) may run real models on synthetic input to guard output quality.
+     They never run by default: `uv run pytest -m integration --no-cov`.
 5. **CI must stay green.** GitHub Actions (`.github/workflows/tests.yml`, `ubuntu-latest`)
    runs the suite on every push to `main` and on PRs. It's free for public repos and only
    sees code + synthetic test audio, so it doesn't break the local-only rule.
