@@ -3,9 +3,16 @@
 ## What this is
 A command-line tool that takes long voice memos (often 30+ min, rambling, single speaker),
 transcribes them locally, and produces:
-1. **Executive summary** — one page: TL;DR, my action items, decisions, open questions.
+1. **Executive summary** — one page: TL;DR, acuerdos, tareas (who/what/when), pendientes,
+   next meeting, and anything the speaker asks *me* to do.
 2. **Full report** — structured by topic, with timestamps, action-item table, and a
    "tangents" section marking what was safe to skip.
+
+**Who the memos come from:** mostly **elderly people retelling a meeting** they attended
+(community, association, committee…) as a long WhatsApp audio. I'm the listener, not the
+speaker. So the output is **meeting minutes**: owners are the people named in the memo,
+"usted" when the speaker asks me for something. Expect slow speech, digressions, repetition
+and older/rural Costa Rican vocabulary. Keep the tone respectful; never "correct" the speaker.
 
 It also keeps a **history** of every processed memo and offers **search** across them.
 
@@ -113,8 +120,8 @@ before starting it.**
 - [x] Phase 1 — Ingest (`memo process`: picker, ffmpeg → 16kHz mono WAV, SHA-256 dedupe)
 - [x] Phase 2 — Transcription (mlx-whisper `large-v3-turbo`, `--lang`, segments.json, loop warnings)
   — 27:42 Spanish memo in 1:10 (≈24× real time), 0 loops, usable accuracy
-- [ ] Phase 2.5 — Glossary checkpoint (review dcaa.json hits on real transcripts)
-- [ ] Phase 3 — Summarization (chunk → extract → merge → full → exec, `reprocess`)
+- [ ] Phase 3 — Summarization: meeting minutes (chunk → extract → merge → full → exec, `reprocess`)
+- [ ] Phase 3.5 — Glossary checkpoint (judge dcaa.json by its effect on summaries)
 - [ ] Phase 4 — Output (markdown to Drive folder, localized headings, optional `--docx`)
 - [ ] Phase 5 — History & search (SQLite + FTS5: `list`, `search`, `show`, `todos`)
 

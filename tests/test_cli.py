@@ -1,9 +1,10 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
-from crc_memo import config, ingest, transcribe
+from crc_memo import config, ingest, summarize, transcribe
 from crc_memo.cli import app
 
 runner = CliRunner()
@@ -25,6 +26,25 @@ def whisper_calls(monkeypatch):
         return {"language": "es", "segments": [{"start": 0.0, "end": 1.0, "text": " Pura vida."}]}
 
     monkeypatch.setattr(transcribe, "_run_whisper", fake)
+    return calls
+
+
+EMPTY_EXTRACTION = (
+    '{"topics": [], "participants": [], "decisions": [], "action_items": [], '
+    '"open_questions": [], "notable": [], "tangents": [], "next_meeting": []}'
+)
+
+
+@pytest.fixture(autouse=True)
+def llm_calls(monkeypatch):
+    """Fake Ollama for every CLI test."""
+    calls = []
+
+    def fake(messages, schema):
+        calls.append(messages)
+        return SimpleNamespace(message=SimpleNamespace(content=EMPTY_EXTRACTION))
+
+    monkeypatch.setattr(summarize, "_chat", fake)
     return calls
 
 
@@ -50,6 +70,8 @@ def test_process_ingests_and_transcribes(audio_files, memos_dir):
     assert stats["model"] == config.WHISPER_MODEL
     assert stats["audio_seconds"] == pytest.approx(1.0, abs=0.1)
     assert stats["warnings"] == []
+    assert "Extracted 1 chunks" in result.output
+    assert (folder / "extractions.json").exists()
 
 
 def test_process_warns_about_loops(audio_files, monkeypatch):
@@ -72,6 +94,7 @@ def test_process_twice_skips_both_steps(audio_files, whisper_calls):
     assert second.exit_code == 0
     assert "Already ingested" in second.output
     assert "Already transcribed" in second.output
+    assert "Already extracted" in second.output
     assert len(whisper_calls) == 1  # Whisper ran only the first time
 
 
@@ -123,3 +146,13 @@ def test_unimplemented_commands_say_so(args):
     result = runner.invoke(app, args)
     assert result.exit_code == 0
     assert "Not implemented yet" in result.output
+
+
+def test_process_reports_llm_error(audio_files, monkeypatch):
+    def down(messages, schema):
+        raise summarize.SummarizeError("Can't reach Ollama. Start it with: brew services start ollama")
+
+    monkeypatch.setattr(summarize, "_chat", down)
+    result = runner.invoke(app, ["process", str(audio_files[".m4a"])])
+    assert result.exit_code == 1
+    assert "brew services start ollama" in result.output

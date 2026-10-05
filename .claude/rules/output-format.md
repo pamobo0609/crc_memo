@@ -6,61 +6,63 @@ paths:
 ---
 # Report output format
 
-Target shape of the generated reports. Loaded when working on report generation or writing.
-Spanish memos get the same structure with Spanish headings (see the es/en table rule in CLAUDE.md).
+Target shape of the generated reports: **meeting minutes** retold by an (often elderly) speaker.
+Loaded when working on report generation or writing. Headings, labels and dates come from the
+es/en table in code; the LLM writes only the prose and items. English memos get the same
+structure with English labels. Sections with nothing in them are omitted.
 
-### executive-summary.md
+### executive-summary.md (Spanish memo)
 ```markdown
-# Website Relaunch Update — Oct 5, 2026
-**Duration:** 31 min · **Sender:** Marco · **Processed:** Oct 5, 14:22
+# Reunión de la Asociación de Vecinos — 5 oct 2026
+**Duración:** 27 min · **Envía:** Doña Marta · **Procesado:** 5 oct 2026, 14:22
 
-## TL;DR
-Relaunch moves to Nov 15 (was Nov 1) because the client wants a new checkout flow.
-Blog is cut from v1. You owe Laura updated mockups by Friday.
+## En resumen
+La cuota mensual sube a ₡5.000 desde noviembre para pintar el salón comunal. Doña Rosa
+cotiza la pintura antes del 15. Falta saber si la municipalidad da el permiso para el turno.
 
-## What you need to do
-- [ ] Send updated homepage + checkout mockups to Laura — **Fri Oct 9**
-- [ ] Confirm whether you can cover QA week of Nov 9
+## Le piden a usted
+- [ ] Enviar la lista de asociados por WhatsApp — **el lunes** [05:42]
 
-## Decisions made
-- Launch date moved to **Nov 15**
-- Blog removed from v1, revisit in January
+## Acuerdos
+- La cuota mensual sube a **₡5.000** desde noviembre [03:10, repetido 12:40]
+- El turno se hace en diciembre si hay permiso [09:05]
 
-## Open questions
-- Hosting budget increase not yet approved
-- No owner for content migration
+## Tareas
+| Quién | Qué | Cuándo |
+|---|---|---|
+| Doña Rosa | Cotizar la pintura del salón | antes del 15 |
+| Jorge | Hablar con la municipalidad sobre el alumbrado | sin fecha |
 
-## Worth knowing
-Client is frustrated with current load times — performance will likely be the main
-judgment criterion at launch.
+## Pendientes
+- ¿La municipalidad dará el permiso para el turno?
+
+## Próxima reunión
+Sábado 25 a las 3 p. m., salón comunal
 ```
 
-### full-report.md
+### full-report.md (Spanish memo)
 ```markdown
-# Website Relaunch Update — Full Report
-Oct 5, 2026 · 31 min · Marco
+# Reunión de la Asociación de Vecinos — Informe completo
+5 oct 2026 · 27 min · Doña Marta
 
-## 1. Timeline change [00:30–06:10]
-Client requested a redesigned checkout after seeing a competitor's site. Adds ~2 weeks.
-New launch date: Nov 15. Repeated at [18:45] and [27:10].
+**Participantes:** Don Carlos (presidente), Doña Rosa (tesorera), Jorge
 
-## 2. Scope cuts [06:10–11:40]
-- Blog removed from v1
-- Newsletter signup stays, simplified to email-only
+## 1. Cuota y pintura del salón [00:30–06:10]
+Don Carlos propuso subir la cuota para pintar el salón... Se acordó ₡5.000 desde noviembre.
+Se repitió en [12:40].
 
-## 3. Hosting and performance [11:40–19:30]
+## 2. Turno de diciembre [06:10–11:40]
 ...
 
-## Tangents (safe to skip)
-- [21:00–25:30] Story about a previous agency project; no action items.
-
-## Action items
-| Task | Owner | Due | Source |
+## Tareas
+| Quién | Qué | Cuándo | Fuente |
 |---|---|---|---|
-| Updated mockups to Laura | Me | Fri Oct 9 | [08:15] |
-| Confirm QA availability | Me | — | [29:40] |
-| Check hosting budget | Marco | — | [15:20] |
+| Usted | Enviar la lista de asociados por WhatsApp | el lunes | [05:42] |
+| Doña Rosa | Cotizar la pintura del salón | antes del 15 | [04:15] |
 
-## Open questions
+## Pendientes
 ...
+
+## Desvíos (se pueden saltar)
+- [08:30–10:45] Historia sobre la boda de la nieta; sin acuerdos ni tareas.
 ```

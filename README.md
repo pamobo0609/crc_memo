@@ -9,11 +9,14 @@
 **Turn long, rambling voice memos into something you can act on — entirely on your Mac,
 for $0, with first-class support for Costa Rican Spanish.**
 
-You get a 30-minute WhatsApp voice note. `crc_memo` transcribes it locally and gives you:
+Many people — especially older relatives and community members — report on meetings
+through long, wandering WhatsApp voice notes. `crc_memo` transcribes the audio locally and
+turns it into **meeting minutes**:
 
-- **An executive summary** — one page: TL;DR, *your* action items, decisions, open questions.
-- **A full report** — organized by topic with timestamps, an action-item table, and a
-  "tangents" section that tells you what was safe to skip.
+- **An executive summary** — one page: TL;DR, agreements, tasks (who / what / when), open
+  questions, the next meeting, and anything the speaker asks *you* to do.
+- **A full report** — organized by topic with timestamps, a task table, and a "tangents"
+  section that tells you what was safe to skip.
 - **A searchable history** — find *"what did he say about the hosting budget?"* across every
   memo you've ever processed.
 
@@ -58,8 +61,8 @@ processing the same file twice is instant.
 | 0 | Setup, CLI skeleton | ✅ |
 | 1 | Ingest: file picker, ffmpeg → WAV, dedupe by hash | ✅ |
 | 2 | Transcription (mlx-whisper `large-v3-turbo`): a 27-min Spanish memo in ~1 min | ✅ |
-| 2.5 | Glossary checkpoint against real transcripts | ⏳ next |
-| 3 | Summarization (chunk → extract → merge → reports) | ⬜ |
+| 3 | Summarization into meeting minutes (chunk → extract → merge → reports) | ⏳ in progress |
+| 3.5 | Glossary checkpoint, judged by its effect on summaries | ⬜ |
 | 4 | Output to a Google Drive folder, optional `.docx` | ⬜ |
 | 5 | History & full-text search | ⬜ |
 

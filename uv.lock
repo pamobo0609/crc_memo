@@ -155,6 +155,7 @@ source = { editable = "." }
 dependencies = [
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "ollama" },
+    { name = "pydantic" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -170,6 +171,7 @@ dev = [
 requires-dist = [
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.4.3" },
     { name = "ollama", specifier = ">=0.6.3" },
+    { name = "pydantic", specifier = ">=2.13.5" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "typer", specifier = ">=0.27.2" },
 ]

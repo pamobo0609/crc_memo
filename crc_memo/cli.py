@@ -8,8 +8,9 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.markup import escape
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from crc_memo import config, ingest, transcribe
+from crc_memo import config, ingest, summarize, transcribe
 
 app = typer.Typer(
     help="Transcribe and summarize voice memos, locally.",
@@ -49,7 +50,8 @@ def process(
         status = "Already ingested" if result.skipped else "[green]Ingested[/green]"
         console.print(f"{status} [bold]{result.memo_id}[/bold] → {result.folder}")
         _transcribe_step(result.folder, lang)
-    except (ingest.IngestError, transcribe.TranscribeError) as e:
+        _extract_step(result.folder)
+    except (ingest.IngestError, transcribe.TranscribeError, summarize.SummarizeError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
 
@@ -96,6 +98,33 @@ def _transcribe_step(folder: Path, lang: str | None) -> None:
         )
     if loops:
         console.print("[dim]Check those spots; if loops are common we'll tune Whisper.[/dim]")
+
+
+def _extract_step(folder: Path) -> None:
+    if summarize.is_extracted(folder):
+        console.print("Already extracted")
+        return
+
+    started = time.monotonic()
+    with Progress(
+        TextColumn(f"Extracting meeting notes with [bold]{config.LLM_MODEL}[/bold]"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("extract", total=None)
+        results = summarize.extract(
+            folder, lambda done, total: progress.update(task, completed=done, total=total)
+        )
+    elapsed = transcribe.format_timestamp(time.monotonic() - started)
+    count = lambda field: sum(len(getattr(r, field)) for r in results)
+    console.print(
+        f"[green]Extracted[/green] {len(results)} chunks in {elapsed} · "
+        f"{count('decisions')} decisions · {count('action_items')} tasks · "
+        f"{count('open_questions')} open questions (before merging) → "
+        f"{folder / summarize.EXTRACTIONS_NAME}"
+    )
 
 
 @app.command("list")
