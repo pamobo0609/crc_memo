@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -38,10 +40,28 @@ def test_process_ingests_and_transcribes(audio_files, memos_dir):
 
     assert result.exit_code == 0, result.output
     assert "Ingested" in result.output
-    assert "Transcribed" in result.output
+    assert "Transcribed 00:01 of audio in" in result.output
+    assert "× real time" in result.output
     assert "language es" in result.output
+    assert "possible Whisper loop" not in result.output
     (folder,) = memos_dir.iterdir()
     assert (folder / "transcript.txt").read_text() == "[00:00] Pura vida.\n"
+    stats = json.loads((folder / "meta.json").read_text())["transcription"]
+    assert stats["model"] == config.WHISPER_MODEL
+    assert stats["audio_seconds"] == pytest.approx(1.0, abs=0.1)
+    assert stats["warnings"] == []
+
+
+def test_process_warns_about_loops(audio_files, monkeypatch):
+    stuck = [{"start": 750.0 + i, "end": 751.0 + i, "text": " [música] Gracias."} for i in range(4)]
+    monkeypatch.setattr(
+        transcribe, "_run_whisper", lambda wav, **o: {"language": "es", "segments": stuck}
+    )
+    result = runner.invoke(app, ["process", str(audio_files[".m4a"])])
+
+    assert result.exit_code == 0
+    assert "possible Whisper loop at [12:30] (×4): «[música] Gracias.»" in result.output
+    assert "if loops are common" in result.output
 
 
 def test_process_twice_skips_both_steps(audio_files, whisper_calls):

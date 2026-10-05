@@ -111,7 +111,8 @@ Full phase details and "done when" criteria: `docs/ROADMAP.md`. **Read the phase
 before starting it.**
 - [x] Phase 0 — Setup
 - [x] Phase 1 — Ingest (`memo process`: picker, ffmpeg → 16kHz mono WAV, SHA-256 dedupe)
-- [ ] Phase 2 — Transcription (mlx-whisper `large-v3-turbo`, `--lang`, segments.json)
+- [x] Phase 2 — Transcription (mlx-whisper `large-v3-turbo`, `--lang`, segments.json, loop warnings)
+  — 27:42 Spanish memo in 1:10 (≈24× real time), 0 loops, usable accuracy
 - [ ] Phase 2.5 — Glossary checkpoint (review dcaa.json hits on real transcripts)
 - [ ] Phase 3 — Summarization (chunk → extract → merge → full → exec, `reprocess`)
 - [ ] Phase 4 — Output (markdown to Drive folder, localized headings, optional `--docx`)

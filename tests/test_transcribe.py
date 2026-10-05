@@ -98,7 +98,7 @@ def test_save_writes_transcript_segments_and_language(whisper_calls, memo_folder
     result = transcribe.transcribe(memo_folder / ingest.WAV_NAME, "some/model")
     assert not transcribe.is_transcribed(memo_folder)
 
-    transcribe.save(result, memo_folder)
+    transcribe.save(result, memo_folder, {"speed": 16.0, "warnings": []})
 
     assert transcribe.is_transcribed(memo_folder)
     assert (memo_folder / "transcript.txt").read_text() == (
@@ -109,6 +109,7 @@ def test_save_writes_transcript_segments_and_language(whisper_calls, memo_folder
     assert segments[1] == {"start": 75.46, "end": 80.0, "text": "Ocupo los diseños el viernes."}
     meta = json.loads((memo_folder / "meta.json").read_text())
     assert meta["language"] == "es"
+    assert meta["transcription"] == {"speed": 16.0, "warnings": []}
     assert meta["source_name"] == "memo.m4a"  # existing fields are kept
 
 
@@ -117,5 +118,39 @@ def test_failed_save_does_not_look_transcribed(whisper_calls, memo_folder):
     (memo_folder / "meta.json").unlink()  # make saving fail halfway
 
     with pytest.raises(FileNotFoundError):
-        transcribe.save(result, memo_folder)
+        transcribe.save(result, memo_folder, {})
     assert not transcribe.is_transcribed(memo_folder)
+
+
+def seg(start, text):
+    return transcribe.Segment(start, start + 5, text)
+
+
+CLEAN = [
+    seg(0, "Diay mae, le cuento rapidito cómo está el brete con lo del sitio web."),
+    seg(5, "Bueno, bueno, bueno. Eso lo vemos en enero."),  # natural repetition: fine
+    seg(10, "Pura vida, hablamos ahorita."),
+]
+
+
+def test_find_loops_clean_transcript():
+    assert transcribe.find_loops(CLEAN) == []
+
+
+def test_find_loops_repeated_lines():
+    stuck = [seg(0, "Hola."), seg(750, "Gracias por ver el video."), seg(755, "gracias por ver el video"),
+             seg(760, "Gracias, por ver el video!"), seg(765, "Pura vida.")]
+    assert transcribe.find_loops(stuck) == [
+        transcribe.LoopWarning(750, "repeat", "Gracias por ver el video.", 3)
+    ]
+
+
+def test_find_loops_two_repeats_is_not_a_loop():
+    assert transcribe.find_loops([seg(0, "Sí."), seg(5, "Sí."), seg(10, "Listo.")]) == []
+
+
+def test_find_loops_inside_one_segment():
+    looping = seg(90, "y entonces le dije que sí, " * 12)
+    (warning,) = transcribe.find_loops(CLEAN + [looping])
+    assert (warning.at, warning.kind, warning.count) == (90, "loop", 1)
+    assert len(warning.text) == 60 and warning.text.endswith("...")

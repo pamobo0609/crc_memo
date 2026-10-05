@@ -18,7 +18,7 @@ You get a 30-minute WhatsApp voice note. `crc_memo` transcribes it locally and g
   memo you've ever processed.
 
 > [!NOTE]
-> **Work in progress.** Ingest works today; transcription and summarization are next.
+> **Work in progress.** Ingest and transcription work today; summarization is next.
 > See [Status](#status).
 
 ---
@@ -57,8 +57,8 @@ processing the same file twice is instant.
 |---|---|---|
 | 0 | Setup, CLI skeleton | ✅ |
 | 1 | Ingest: file picker, ffmpeg → WAV, dedupe by hash | ✅ |
-| 2 | Transcription (mlx-whisper `large-v3-turbo`) | ⏳ next |
-| 2.5 | Glossary checkpoint against real transcripts | ⬜ |
+| 2 | Transcription (mlx-whisper `large-v3-turbo`): a 27-min Spanish memo in ~1 min | ✅ |
+| 2.5 | Glossary checkpoint against real transcripts | ⏳ next |
 | 3 | Summarization (chunk → extract → merge → reports) | ⬜ |
 | 4 | Output to a Google Drive folder, optional `.docx` | ⬜ |
 | 5 | History & full-text search | ⬜ |
@@ -103,7 +103,7 @@ uv run memo process              # no path → opens the macOS file picker
 
 | Command | Does | |
 |---|---|---|
-| `memo process [PATH]` | Ingest (and later transcribe + summarize) a memo. No path → file picker. | ✅ ingest |
+| `memo process [PATH] [--lang es]` | Ingest and transcribe a memo (summaries come next). No path → file picker. | ✅ ingest + transcribe |
 | `memo list` | Processed memos: date, title, duration, open action items | planned |
 | `memo search "query"` | Full-text search across transcripts and reports, with timestamps | planned |
 | `memo show ID [--exec\|--full\|--transcript]` | Print a memo's summary, report or transcript | planned |
@@ -118,7 +118,9 @@ data/                        ← gitignored, never synced by this tool
 └── memos/<id>/              ← <id> = first 12 chars of the file's SHA-256
     ├── original.ogg         ← untouched copy of what you processed
     ├── audio.wav            ← 16 kHz mono, what Whisper reads
-    └── meta.json            ← original filename, when it was ingested
+    ├── transcript.txt       ← one [MM:SS] line per segment
+    ├── segments.json        ← exact segment timestamps
+    └── meta.json            ← original filename, language, transcription speed + loop warnings
 ```
 
 Finished reports go to an output folder you choose (default: a Google Drive for desktop

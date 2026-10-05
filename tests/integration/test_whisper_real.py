@@ -88,7 +88,7 @@ def test_real_whisper_transcribes_costa_rican_spanish(spanish_memo, tmp_path):
 
     folder = ingest.ingest(spanish_memo, tmp_path / "memos").folder
     result = transcribe.transcribe(folder / ingest.WAV_NAME, config.WHISPER_MODEL)
-    transcribe.save(result, folder)
+    transcribe.save(result, folder, {})
 
     text = " ".join(s.text for s in result.segments)
     assert result.language == "es"

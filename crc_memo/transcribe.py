@@ -1,12 +1,19 @@
 """Transcribe: audio.wav -> transcript.txt + segments.json, using Whisper on Apple Silicon."""
 
 import json
+import re
 import wave
+import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 TRANSCRIPT_NAME = "transcript.txt"
 SEGMENTS_NAME = "segments.json"
+
+# Whisper's own repetition test: text that compresses this well is looping.
+# Normal Spanish segments measure ~1.3-1.5; a real loop ~8; "bueno, bueno, bueno" ~1.8.
+LOOP_COMPRESSION_RATIO = 2.4
+REPEAT_RUN = 3  # this many identical lines in a row = Whisper stuck repeating itself
 
 
 class TranscribeError(Exception):
@@ -24,6 +31,14 @@ class Segment:
 class Transcript:
     language: str
     segments: list[Segment]
+
+
+@dataclass
+class LoopWarning:
+    at: float  # seconds
+    kind: str  # "repeat" (same line N times in a row) or "loop" (repetitive inside one line)
+    text: str  # shortened
+    count: int = 1
 
 
 def _run_whisper(wav: Path, **options) -> dict:
@@ -68,6 +83,38 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02}:{secs:02}" if hours else f"{minutes:02}:{secs:02}"
 
 
+def _normalize(text: str) -> str:
+    return re.sub(r"[^\w]+", " ", text.lower()).strip()
+
+
+def _compression_ratio(text: str) -> float:
+    data = text.encode()
+    return len(data) / len(zlib.compress(data))
+
+
+def _short(text: str) -> str:
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+def find_loops(segments: list[Segment]) -> list[LoopWarning]:
+    """Spot Whisper's classic long-audio failure: getting stuck repeating itself."""
+    warnings = []
+    i = 0
+    while i < len(segments):
+        run = 1
+        while (
+            i + run < len(segments)
+            and _normalize(segments[i + run].text) == _normalize(segments[i].text)
+        ):
+            run += 1
+        if run >= REPEAT_RUN:
+            warnings.append(LoopWarning(segments[i].start, "repeat", _short(segments[i].text), run))
+        elif _compression_ratio(segments[i].text) > LOOP_COMPRESSION_RATIO:
+            warnings.append(LoopWarning(segments[i].start, "loop", _short(segments[i].text)))
+        i += run
+    return warnings
+
+
 def audio_duration(wav: Path) -> float:
     """Length in seconds, read from the WAV header."""
     with wave.open(str(wav)) as w:
@@ -78,9 +125,10 @@ def is_transcribed(folder: Path) -> bool:
     return (folder / TRANSCRIPT_NAME).exists()
 
 
-def save(transcript: Transcript, folder: Path) -> None:
+def save(transcript: Transcript, folder: Path, stats: dict) -> None:
     """transcript.txt is for reading (one timestamped line per segment, phone-friendly);
-    segments.json keeps exact times for chunking in Phase 3.
+    segments.json keeps exact times for chunking in Phase 3; `stats` (model, speed,
+    loop warnings) go into meta.json under "transcription".
 
     transcript.txt is written last: it marks "done", so a crash halfway never
     leaves a memo that looks transcribed but isn't.
@@ -92,6 +140,7 @@ def save(transcript: Transcript, folder: Path) -> None:
     meta_path = folder / "meta.json"
     meta = json.loads(meta_path.read_text())
     meta["language"] = transcript.language
+    meta["transcription"] = stats
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
 
     lines = [f"[{format_timestamp(s.start)}] {s.text}" for s in transcript.segments]

@@ -1,11 +1,13 @@
 """Command-line entry point. Commands are stubs until their phase lands."""
 
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from crc_memo import config, ingest, transcribe
 
@@ -61,19 +63,39 @@ def _transcribe_step(folder: Path, lang: str | None) -> None:
         return
 
     wav = folder / ingest.WAV_NAME
-    length = transcribe.format_timestamp(transcribe.audio_duration(wav))
+    audio_seconds = transcribe.audio_duration(wav)
+    length = transcribe.format_timestamp(audio_seconds)
     console.print(
         f"Transcribing {length} of audio with [bold]{config.WHISPER_MODEL}[/bold]…\n"
         "[dim](the first run downloads the model, ~1.6 GB)[/dim]"
     )
     started = time.monotonic()
     result = transcribe.transcribe(wav, config.WHISPER_MODEL, lang, config.WHISPER_INITIAL_PROMPT)
-    transcribe.save(result, folder)
-    elapsed = transcribe.format_timestamp(time.monotonic() - started)
+    seconds = time.monotonic() - started
+    speed = audio_seconds / max(seconds, 0.001)
+    loops = transcribe.find_loops(result.segments)
+    transcribe.save(result, folder, {
+        "model": config.WHISPER_MODEL,
+        "audio_seconds": round(audio_seconds, 1),
+        "seconds": round(seconds, 1),
+        "speed": round(speed, 1),
+        "warnings": [asdict(w) for w in loops],
+    })
+
     console.print(
-        f"[green]Transcribed[/green] in {elapsed} · language [bold]{result.language}[/bold] · "
-        f"{len(result.segments)} segments → {folder / transcribe.TRANSCRIPT_NAME}"
+        f"[green]Transcribed[/green] {length} of audio in "
+        f"{transcribe.format_timestamp(seconds)} ({speed:.1f}× real time) · "
+        f"language [bold]{result.language}[/bold] · {len(result.segments)} segments → "
+        f"{folder / transcribe.TRANSCRIPT_NAME}"
     )
+    for w in loops:
+        count = f" (×{w.count})" if w.count > 1 else ""
+        console.print(
+            f"[yellow]⚠ possible Whisper loop at [{transcribe.format_timestamp(w.at)}]"
+            f"{count}:[/yellow] «{escape(w.text)}»"
+        )
+    if loops:
+        console.print("[dim]Check those spots; if loops are common we'll tune Whisper.[/dim]")
 
 
 @app.command("list")
