@@ -1,0 +1,36 @@
+# Runs the test suite on every push to main and on pull requests.
+# Free: GitHub Actions has unlimited minutes on standard runners for public repos.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch cancels the run still in progress.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Tests convert real audio (opus/ogg/m4a), so they need ffmpeg.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      # uv reads .python-version and installs Python 3.12 itself.
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # --locked fails if uv.lock is out of date with pyproject.toml.
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # Coverage gate (100% line + branch) is configured in pyproject.toml.
+      - name: Run tests
+        run: uv run pytest
