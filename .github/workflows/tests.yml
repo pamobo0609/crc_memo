@@ -23,7 +23,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       # uv reads .python-version and installs Python 3.12 itself.
-      - uses: astral-sh/setup-uv@v10
+      # Pinned to an exact version: setup-uv doesn't publish moving major tags (no `v10`).
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
 
