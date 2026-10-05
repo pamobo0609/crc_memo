@@ -5,4 +5,6 @@ __pycache__/
 dcaa.pdf
 data/
 scripts/.cache/
+.coverage
+.DS_Store
 .claude/settings.local.json

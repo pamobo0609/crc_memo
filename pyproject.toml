@@ -24,4 +24,10 @@ module-root = ""
 dev = [
     "pdfplumber>=0.11.10",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Line + branch coverage of the app package; anything under 100% fails the run.
+addopts = "--cov=crc_memo --cov-branch --cov-report=term-missing --cov-fail-under=100"
