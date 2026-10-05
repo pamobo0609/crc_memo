@@ -8,3 +8,21 @@ scripts/.cache/
 .coverage
 .DS_Store
 .claude/settings.local.json
+
+# Audio never belongs in this public repo
+# (real memos go in data/, tests generate their own)
+*.ogg
+*.opus
+*.oga
+*.m4a
+*.mp3
+*.wav
+*.aac
+*.flac
+*.amr
+*.caf
+*.aiff
+*.aif
+*.wma
+*.webm
+*.mp4
