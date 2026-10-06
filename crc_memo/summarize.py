@@ -698,7 +698,7 @@ def write(
 
     title = _value(_sentence(overview.title)) if overview else None
     summary = _value(overview.summary) if overview else None
-    prose = Prose(title=title, summary=_sentence(summary, period=True) if summary else None,
+    prose = Prose(meeting_recap=overview.meeting_recap if overview else None, title=title, summary=_sentence(summary, period=True) if summary else None,
                   developments=developments)
     _write_json(folder / PROSE_NAME, prose.model_dump())
     save_stats(folder, "write", stats)

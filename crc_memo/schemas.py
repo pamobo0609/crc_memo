@@ -192,6 +192,12 @@ class Development(BaseModel):  # one call per topic, from that topic's transcrip
 
 
 class Overview(BaseModel):  # one call, from the developments + items (not the transcript)
+    # Groups also send complaints and announcements; forced into a minuta, those got an
+    # invented meeting (a date as the place, two people thanked as "presidió").
+    meeting_recap: bool = Field(
+        description="true if the speaker retells a meeting that took place; false for other "
+                    "messages (complaints, announcements, opinions)"
+    )
     # Not a Label: maxLength cut a 60-character title mid-phrase ("…y la Asociación de").
     title: Sentence = Field(description='name of the meeting in 3-8 words, e.g. "Reunión de la Asociación de Vecinos"')
     summary: Paragraph = Field(
@@ -200,6 +206,7 @@ class Overview(BaseModel):  # one call, from the developments + items (not the t
 
 
 class Prose(BaseModel):  # prose.json, rendered together with minutes.json
+    meeting_recap: bool | None = None  # None: unknown (nothing extracted, or an older prose.json)
     title: str | None
     summary: str | None
     developments: dict[str, str | None]  # topic id -> development

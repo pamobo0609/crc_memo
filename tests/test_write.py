@@ -14,7 +14,8 @@ class LLM(list):
     def __init__(self, developments, overview=None):
         super().__init__()
         self.developments = list(developments)
-        self.overview = overview or {"title": "Reunión de vecinos", "summary": "sube a cinco rojos"}
+        self.overview = overview or {"meeting_recap": True, "title": "Reunión de vecinos",
+                                     "summary": "sube a cinco rojos"}
 
     def __call__(self, messages, schema):
         self.append((schema["title"], messages[0]["content"]))
@@ -67,7 +68,7 @@ def test_write_one_call_per_topic_then_overview(tmp_path, monkeypatch, no_thresh
     assert "- Agreement: Pintar el salón" in overview and "- Pending:" in overview
     assert "pintar el salón\n" not in overview
 
-    assert prose == Prose(title="Reunión de vecinos", summary="Sube a ₡5.000.",
+    assert prose == Prose(meeting_recap=True, title="Reunión de vecinos", summary="Sube a ₡5.000.",
                           developments={"T1": "Se habló de pintar, con ₡5.000.", "T2": None})
     assert json.loads((tmp_path / "prose.json").read_text()) == prose.model_dump()
     assert summarize.is_written(tmp_path)
@@ -76,13 +77,14 @@ def test_write_one_call_per_topic_then_overview(tmp_path, monkeypatch, no_thresh
 
 
 def test_topic_without_lines_gets_no_call(tmp_path, monkeypatch):
-    llm = LLM(["el turno se discutió"], overview={"title": "", "summary": "no se menciona"})
+    llm = LLM(["el turno se discutió"],
+              overview={"meeting_recap": False, "title": "", "summary": "no se menciona"})
     monkeypatch.setattr(summarize, "_chat", llm)
 
     prose = summarize.write(write_memo(tmp_path, minutes(), [(85, "el turno")]))
 
     assert [schema for schema, _ in llm] == ["Development", "Overview"]
-    assert prose == Prose(title=None, summary=None,
+    assert prose == Prose(meeting_recap=False, title=None, summary=None,
                           developments={"T1": None, "T2": "El turno se discutió."})
 
 

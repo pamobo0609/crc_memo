@@ -157,3 +157,24 @@ def test_write_renders_both_files(tmp_path):
     assert breve.name == "minuta_breve.md" and completa.name == "minuta_completa.md"
     assert breve.read_text() == output.render(minutes(), PROSE)
     assert completa.read_text() == output.render(minutes(), PROSE, full=True)
+
+
+def test_not_a_meeting_recap_has_no_meeting_details():
+    prose = PROSE.model_copy(update={"meeting_recap": False, "title": "Cuota de representación"})
+    text = output.render(minutes(), prose, full=True)
+    assert text.startswith("# Minuta completa — Cuota de representación\n\n"
+                           "**Relato de:** Marta · audio de 28 min del 5 oct 2026\n\n")
+    for absent in ["**Reunión:**", "Lugar", "Presidió", "Asistentes"]:
+        assert absent not in text
+
+
+def test_not_a_meeting_recap_without_date():
+    m = minutes(source=Source(sender=None, memo_date=None, duration="05:33", language="es"))
+    text = output.render(m, PROSE.model_copy(update={"meeting_recap": False}))
+    assert "\n\naudio de 6 min\n\n" in text
+
+
+def test_older_prose_without_the_flag_renders_as_a_meeting():
+    prose = Prose.model_validate({"title": "x", "summary": None, "developments": {}})
+    assert prose.meeting_recap is None
+    assert "**Reunión:** ayer" in output.render(minutes(), prose)

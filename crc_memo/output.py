@@ -21,6 +21,7 @@ LABELS = {
         "minuta": "Minuta", "minuta_completa": "Minuta completa", "untitled": "Reunión",
         "meeting": "Reunión", "per_audio": "según el audio del {date}", "place": "Lugar",
         "chaired_by": "Presidió", "told_by": "Relato de", "audio": "audio de {duration}",
+        "audio_dated": "audio de {duration} del {date}",
         "attendees": "Asistentes",
         "recipients_ask": "Piden a quienes reciben el audio",
         "recipients": "Quienes reciben el audio", "speaker": "Quien envía el audio",
@@ -40,6 +41,7 @@ LABELS = {
         "minuta": "Minutes", "minuta_completa": "Full minutes", "untitled": "Meeting",
         "meeting": "Meeting", "per_audio": "per the audio of {date}", "place": "Place",
         "chaired_by": "Chaired by", "told_by": "Told by", "audio": "{duration} audio",
+        "audio_dated": "{duration} audio of {date}",
         "attendees": "Attendees",
         "recipients_ask": "The speaker asks everyone receiving the audio",
         "recipients": "Everyone receiving the audio", "speaker": "The sender",
@@ -109,17 +111,25 @@ def _section(title: str, lines: list[str]) -> str | None:
     return f"## {title}\n" + "\n".join(lines) if lines else None
 
 
-def _header(m: Minutes, labels: dict, full: bool) -> str | None:
-    audio_date = m.source.memo_date and labels["per_audio"].format(
-        date=format_date(m.source.memo_date, labels))
-    when = ", ".join(v for v in [m.meeting.when, audio_date] if v)
-    meeting = " · ".join(f"**{labels[key]}:** {value}" for key, value in
-                         [("meeting", when), ("place", m.meeting.place),
-                          ("chaired_by", m.meeting.chaired_by)] if value)
+def _header(m: Minutes, labels: dict, full: bool, recap: bool) -> str | None:
+    """Meeting details, then who sent the audio. Not a meeting recap: no meeting details or
+    attendees (the model invents them), and the audio's date goes on the second line."""
+    duration = format_duration(m.source.duration)
+    date_ = m.source.memo_date and format_date(m.source.memo_date, labels)
+    meeting = ""
+    if recap:
+        when = ", ".join(v for v in [m.meeting.when,
+                                     date_ and labels["per_audio"].format(date=date_)] if v)
+        meeting = " · ".join(f"**{labels[key]}:** {value}" for key, value in
+                             [("meeting", when), ("place", m.meeting.place),
+                              ("chaired_by", m.meeting.chaired_by)] if value)
+        audio = labels["audio"].format(duration=duration)
+    else:
+        audio = (labels["audio_dated"].format(duration=duration, date=date_) if date_
+                 else labels["audio"].format(duration=duration))
     told_by = m.source.sender and f"**{labels['told_by']}:** {m.source.sender}"
-    audio = labels["audio"].format(duration=format_duration(m.source.duration))
     lines = [meeting, " · ".join(v for v in [told_by, audio] if v)]
-    if full and m.attendees:
+    if full and recap and m.attendees:
         lines.append(f"**{labels['attendees']}:** {', '.join(m.attendees)}")
     return "\n".join(line for line in lines if line)
 
@@ -174,7 +184,7 @@ def render(m: Minutes, prose: Prose, full: bool = False) -> str:
 
     blocks = [
         f"# {labels['minuta_completa' if full else 'minuta']} — {title}",
-        _header(m, labels, full),
+        _header(m, labels, full, recap=prose.meeting_recap is not False),
         _recipients(m, labels),
     ]
     if full:

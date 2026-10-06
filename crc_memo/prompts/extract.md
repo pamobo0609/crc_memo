@@ -16,7 +16,9 @@ You are extracting meeting minutes (a "minuta") from one part of a voice memo tr
 - Items start with the [MM:SS] timestamp of the line they come from, then a short literal
   quote from that line, then the point itself.
 - **Each fact goes in exactly one field:**
-  - meeting: which group met, when, where and who led it — only if this part says so.
+  - meeting: which group met, when, where and who led it — only if this part retells a
+    specific meeting that took place. Thanking people, or mentioning an old event, is not a
+    meeting: leave it empty. place is a place, never a date.
   - topics: the main subjects of this part — usually 1 to 3 — with the MM:SS where each
     starts and ends, and a 2–6 word title like "Pintura del salón". A subject lasts
     minutes: don't split it into subtopics, and don't make a topic of a passing remark.

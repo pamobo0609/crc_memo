@@ -299,3 +299,10 @@ def test_reprocess_without_memos_dir():
     result = runner.invoke(app, ["reprocess", "abc"])
     assert result.exit_code == 1
     assert "No memo 'abc'" in result.output
+
+
+def test_warns_when_the_audio_is_not_a_meeting_recap(memo):
+    prose = json.loads((memo / "prose.json").read_text()) | {"meeting_recap": False}
+    (memo / "prose.json").write_text(json.dumps(prose))
+    result = runner.invoke(app, ["reprocess", memo.name, "--from", "render"])
+    assert "doesn't seem to retell a meeting" in " ".join(result.output.split())

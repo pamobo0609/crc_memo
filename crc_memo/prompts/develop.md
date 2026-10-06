@@ -14,6 +14,8 @@ it ended.
 - Use only what the transcript below says. Never invent people, dates, amounts or decisions.
 - The items listed below were already extracted from this part and appear elsewhere in the
   minuta. Stay consistent with them, but tell the story; don't just list them again.
+- When the speaker quotes or imitates someone else ("es que yo pagué mucho menos…", said
+  about a critic), say whose words they are; never present them as the speaker's own.
 - Leave out personal stories and chit-chat unrelated to the meeting (the minuta lists them
   separately as digressions).
 - Only if the transcript itself asks the people receiving the audio for something ("usted",

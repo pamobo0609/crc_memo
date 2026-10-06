@@ -14,6 +14,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
 from crc_memo import config, ingest, output, summarize, transcribe
+from crc_memo.schemas import Prose
 
 app = typer.Typer(
     help="Transcribe and summarize voice memos, locally.",
@@ -260,6 +261,10 @@ def _write_step(folder: Path) -> None:
 
     for path in output.write(folder):
         console.print(f"[green]Minuta[/green] → {path}")
+    prose = Prose.model_validate_json((folder / summarize.PROSE_NAME).read_text())
+    if prose.meeting_recap is False:
+        console.print("[yellow]⚠ This audio doesn't seem to retell a meeting: no meeting "
+                      "details in the minuta. Review it before sharing.[/yellow]")
 
 
 @app.command("list")
