@@ -11,6 +11,11 @@ Rendered from `minutes.json` (contract in `.claude/rules/llm.md`). The LLM write
 from the es/en table in code. Sections with nothing in them are omitted. It's built from a
 retelling, so it says so — never present it as an official acta.
 
+Commitment owners: the name (`person`); the sender's name, or "Quien envía el audio" when
+unknown (`speaker`); **Quienes reciben el audio** (`recipients`, also in the callout at the
+top); "sin asignar" (`nobody`). Acuerdos/pendientes/observaciones end with a period;
+compromisos and desvíos don't.
+
 Decisions (with the user): desvíos and observaciones only in the completa; [mm:ss] timestamps
 only in the completa; the recipients line appears only when the speaker asks the recipients.
 
@@ -20,7 +25,8 @@ only in the completa; the recipients line appears only when the speaker asks the
 **Reunión:** ayer, según el audio del 5 oct 2026 · **Lugar:** salón comunal · **Presidió:** Don Carlos
 **Relato de:** Marta · audio de 27 min
 
-> **Piden a quienes reciben el audio:** enviar la lista de asociados por WhatsApp — **el lunes**
+> **Piden a quienes reciben el audio:**
+> - Enviar la lista de asociados por WhatsApp — **el lunes**
 
 ## Resumen
 La cuota sube a ₡5.000 desde noviembre para pintar el salón. El turno de diciembre depende
@@ -36,6 +42,7 @@ de un permiso municipal que aún no está confirmado.
 | Doña Rosa | Cotizar la pintura del salón | antes del 15 |
 | Jorge | Hablar con la municipalidad (permiso y alumbrado) | sin fecha |
 | **Quienes reciben el audio** | Enviar la lista de asociados por WhatsApp | el lunes |
+| Marta | Mandar las fotos al grupo | sin fecha |
 
 ## Pendientes
 - ¿Dará la municipalidad el permiso para el turno?

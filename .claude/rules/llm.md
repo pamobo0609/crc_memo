@@ -29,11 +29,16 @@ Loaded when working on summarization, schemas or prompts.
 ## Meeting context
 Memos are elderly people retelling a meeting, sent to a WhatsApp **group**. The recipients
 are not the speaker and may not have attended.
-- `who`: the person named; `""` if nobody is named. `for_recipients: true` when the speaker
-  asks whoever receives the audio ("usted", "ustedes", "les pido a todos").
+- Commitments have an explicit `owner`: `person` (name in `who`) / `speaker` (their own
+  promise: "se los daré") / `recipients` (explicit ask: "traigan") / `nobody`. A
+  `for_recipients` bool failed on a spokesperson's memo: everything said to "ustedes" became
+  the recipients' task (3 of 4 lines in the recipients box were wrong). Code: a name beats a
+  role; a pronoun in `who` ("ustedes", "yo") overrides the model's choice.
 - `due`: as spoken ("el viernes", "antes del 15"); `""` if none. Never compute calendar dates.
-- The model often writes placeholders ("no se menciona") or vague dues (*ahorita*) despite
-  the prompt → **code** turns them into `null` (`NOT_SAID`, `VAGUE_DUE` in summarize.py).
+- The model often writes placeholders ("no se menciona", "no especificado") or vague dues
+  (*ahorita*) despite the prompt → **code** turns them into `null` (`NOT_SAID`,
+  `NOT_SAID_PREFIXES`, `VAGUE_DUE` in summarize.py) and drops items that are just a
+  placeholder sentence ("No se menciona quién…").
 - Money slang (*cinco rojos* → ₡5.000, *medio palo* → ₡500.000): prompting failed twice →
   `normalize_money()` in code, applied to every text field; quotes stay literal.
 - Write values in the memo's language; keys stay English.
@@ -48,7 +53,7 @@ output short — output length is what makes local extraction slow.
   "topics": [{"start": "00:29", "end": "01:25", "title": "Pintura del salón"}],
   "attendees": ["Don Carlos (presidente)", "Doña Rosa (tesorera)"],
   "agreements": [{"timestamp": "00:49", "quote": "la cuota va a ser de cinco rojos", "text": "La cuota sube a cinco rojos"}],
-  "commitments": [{"timestamp": "01:59", "quote": "nos mande la lista de los asociados", "what": "Enviar la lista de asociados por WhatsApp", "who": "", "for_recipients": true, "due": "el lunes"}],
+  "commitments": [{"timestamp": "01:59", "quote": "nos mande la lista de los asociados", "what": "Enviar la lista de asociados por WhatsApp", "owner": "recipients", "who": "", "due": "el lunes"}],
   "pending": [{"timestamp": "01:45", "quote": "no sabemos si la muni nos da el permiso", "text": "¿Dará la municipalidad el permiso?"}],
   "observations": [{"timestamp": "00:22", "quote": "estaba bien molesto", "text": "Don Carlos molesto por la baja asistencia"}],
   "tangents": [{"start": "01:10", "end": "01:18", "summary": "La boda de la nieta"}],
@@ -63,7 +68,7 @@ Every key maps to something the minuta renders; nothing else travels (quotes sto
 `source` (sender, memo_date, duration, language) · `meeting` (group, when, place, chaired_by)
 · `attendees` · `topics` (id T1…, title, start, end — a topic ends where the next starts) ·
 `agreements` / `pending` / `observations` (id A1/P1/O1, topic, text, timestamps) ·
-`commitments` (id C1, topic, what, who, for_recipients, due, timestamps) · `next_meeting`
+`commitments` (id C1, topic, what, owner, who, due, timestamps) · `next_meeting`
 (day, time, place) · `tangents` (start, end, summary). Unknowns are `null`.
 
 ## Merge (3b) — the LLM groups, code merges
@@ -74,8 +79,9 @@ Every key maps to something the minuta renders; nothing else travels (quotes sto
 - Bad groupings are repaired, never fatal: unknown/repeated numbers dropped, missing ones alone.
 - The LLM groups topics too ("Cuotas" = "Cuota de la asociación"); code then assigns each
   item to the topic being discussed at its first timestamp.
-- Deterministic parts stay in code: attendee union, tangent ranges, next meeting = last
-  mention, observations repeating a tangent or the next meeting are dropped.
+- Deterministic parts stay in code: attendee union, tangent ranges, next meeting = most
+  specific mention (filled fields, then a number in the day, then the latest — the last
+  mention was "diciembre" after "el 5 de diciembre"), observations repeating a tangent or the next meeting are dropped.
 - One chunk → no LLM call (extraction already lists each fact once).
 - Parked for 3e (all seen only with artificial 60 s chunks; re-check on real 5-min chunks,
   starting with the 27-min real memo):
@@ -84,3 +90,26 @@ Every key maps to something the minuta renders; nothing else travels (quotes sto
   - earliest wording can be the weakest ("el costo de los rojos" lost the amount) — consider
     the merge's own `fact` sentence for multi-mention groups;
   - a repeated point becoming its own small topic.
+
+## Write (3c) — the LLM writes prose only
+- One call per topic (`develop.md`) from **that topic's transcript lines** (topic start → next
+  topic start; the last runs to the end), digression segments removed, plus the topic's items
+  for consistency. Then one call (`overview.md`) for title + resumen from the developments and
+  items — never from the raw transcript. Saved in `prose.json`; `output.py` renders the minuta.
+- Nothing extracted → no calls (a summary of nothing invites invention).
+- Timestamps are whole seconds: a range ending `01:18` covers up to 78.9 s, or the tail of a
+  digression leaks into the topic.
+- "Mention the recipients" rules get over-applied: the model added a request nobody made
+  until the prompt said "only if the transcript itself asks… never add requests of your own".
+- Tuning on a 27-min spokesperson memo (3 rounds): code fixes stuck every time (topics,
+  next meeting, title, placeholders); prompt-only rules inside the big extraction call were
+  a coin flip (owner, pendientes, tangents). What worked for judgement: **a small focused
+  call per item** — the owner check (`verify_owner.md`, reported speech decided first) took
+  commitments from ~4/8 to 6/8 right for ~1 min. Same pattern is the next lever for
+  pendientes/tangents if needed.
+- Whisper's `initial_prompt` fixed "ICE" but made Whisper emit tiny segments (238 → 967
+  lines); `pack_segments` (LINE_SECONDS) packs them back (→ 97 lines, −24% prompt tokens).
+- Small models turn anything into a question: requiring "¿…?" for pendientes didn't filter.
+- Parked for 3e: completed actions extracted as commitments ("le pregunté…") — candidate
+  `still_to_do` field in the owner check; awkward phrasing ("fueron recordados que deben…"); mild embellishment
+  ("podría haber dificultades").

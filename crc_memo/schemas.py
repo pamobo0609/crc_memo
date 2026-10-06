@@ -9,7 +9,7 @@ Field order is deliberate: `timestamp` and `quote` come first, so the model writ
 *before* the claim (generation runs left to right) instead of inventing a quote afterwards.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,15 @@ Quote = Annotated[str, Field(max_length=120)]
 Sentence = Annotated[str, Field(max_length=200)]
 
 TIMESTAMP = "MM:SS of the transcript line where this is said, copied from its [MM:SS] marker"
+# Who has to do a commitment. An explicit choice: with a bool "for the recipients", the model
+# marked anything said to "ustedes" as the recipients' task, even "se los daré en diciembre"
+# (the speaker's own promise). A spokesperson reporting back says "ustedes" in every sentence.
+Owner = Literal["person", "speaker", "recipients", "nobody"]
+OWNER = (
+    'who does it: "person" = someone named (put the name in who); "speaker" = the person '
+    'speaking promises to do it ("yo les mando", "se los daré"); "recipients" = the speaker asks '
+    'the people receiving the audio to do it ("traigan", "les pido que firmen"); "nobody" = not said'
+)
 QUOTE = "short literal quote from the transcript (max ~15 words) that supports this"
 
 
@@ -49,11 +58,9 @@ class Commitment(BaseModel):
     timestamp: str = Field(description=TIMESTAMP)
     quote: Quote = Field(description=QUOTE)
     what: Sentence = Field(description="what has to be done, as a short imperative")
-    who: Label = Field(description='the person named to do it; "" if nobody is named')
-    for_recipients: bool = Field(
-        description="true if the speaker asks the people receiving the audio (usted, ustedes, todos)"
-    )
-    due: Label = Field(description='deadline as spoken, e.g. "el viernes"; "" if none or vague')
+    owner: Owner = Field(description=OWNER)
+    who: Label = Field(description='the name of the person, only when owner is "person"; else ""')
+    due: Label = Field(description='concrete deadline as spoken, e.g. "el viernes"; "" if none or vague')
 
 
 class Tangent(BaseModel):
@@ -93,6 +100,16 @@ class Group(BaseModel):
     # choosing its numbers stopped bare-number answers from mixing up facts.
     fact: Sentence = Field(description="the single fact (or topic) these items state, in one short sentence")
     items: list[int] = Field(description="numbers of the items that state exactly this fact")
+
+
+class OwnerCheck(BaseModel):  # 3b: one focused call per commitment, after merging
+    # Reported speech first: deciding it before the owner is what keeps "yo les dije,
+    # pásenme las notas" (said to a third party) from becoming a request to the recipients.
+    reported_speech: bool = Field(
+        description="true if the request is the speaker repeating what was said to someone else"
+    )
+    owner: Owner = Field(description=OWNER)
+    who: Label = Field(description='the name or party, only when owner is "person"; else ""')
 
 
 class MergePlan(BaseModel):
@@ -138,8 +155,8 @@ class MinutesCommitment(BaseModel):
     id: str  # C1
     topic: str | None
     what: str
-    who: str | None
-    for_recipients: bool
+    owner: Owner
+    who: str | None  # only for owner == "person"
     due: str | None
     timestamps: list[str]
 
@@ -161,3 +178,28 @@ class Minutes(BaseModel):
     observations: list[Entry]
     next_meeting: MinutesNextMeeting | None
     tangents: list[Tangent]
+
+
+# --- 3c: the prose the LLM writes (code renders everything else) ----------------------
+
+Paragraph = Annotated[str, Field(max_length=900)]
+
+
+class Development(BaseModel):  # one call per topic, from that topic's transcript
+    development: Paragraph = Field(
+        description="2-5 sentences: what was discussed about this topic and how it ended"
+    )
+
+
+class Overview(BaseModel):  # one call, from the developments + items (not the transcript)
+    # Not a Label: maxLength cut a 60-character title mid-phrase ("…y la Asociación de").
+    title: Sentence = Field(description='name of the meeting in 3-8 words, e.g. "Reunión de la Asociación de Vecinos"')
+    summary: Paragraph = Field(
+        description="2-3 sentences: the most important outcomes, for someone who wasn't there"
+    )
+
+
+class Prose(BaseModel):  # prose.json, rendered together with minutes.json
+    title: str | None
+    summary: str | None
+    developments: dict[str, str | None]  # topic id -> development

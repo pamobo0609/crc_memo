@@ -14,7 +14,7 @@ EXTRACTION = ChunkExtraction(
     attendees=["Doña Rosa"],
     agreements=[],
     commitments=[Commitment(timestamp="01:03", quote="Doña Rosa va a cotizar",
-                            what="Cotizar la pintura", who="Doña Rosa", for_recipients=False,
+                            what="Cotizar la pintura", owner="person", who="Doña Rosa",
                             due="antes del 15")],
     pending=[],
     observations=[],
@@ -176,7 +176,7 @@ def make_memo(folder, language="es", n_segments=3):
     return folder
 
 
-def test_extract_saves_one_result_per_chunk(chat_calls, tmp_path, monkeypatch):
+def test_extract_saves_one_result_per_chunk(chat_calls, tmp_path, monkeypatch, no_thresholds):
     monkeypatch.setattr(config, "CHUNK_SECONDS", 20)  # 3 × 10 s segments -> 2 overlapping chunks
     folder = make_memo(tmp_path / "memo")
     progress = []
@@ -205,3 +205,90 @@ def test_extract_language_fallbacks(chat_calls, tmp_path, code, expected):
 
 def test_extract_without_progress_callback(chat_calls, tmp_path):
     assert summarize.extract(make_memo(tmp_path / "memo")) == [EXTRACTION]
+
+
+# --- LLM stats ------------------------------------------------------------------------
+
+def counted(content, done_reason="stop", **counts):
+    """A reply carrying Ollama's counters (durations in nanoseconds)."""
+    return SimpleNamespace(message=SimpleNamespace(content=content), done_reason=done_reason,
+                           **counts)
+
+
+def test_stats_add_up_ollama_counters():
+    stats = summarize.LLMStats()
+    stats.add(counted("{}", prompt_eval_count=1000, prompt_eval_duration=2_000_000_000,
+                      eval_count=240, eval_duration=20_000_000_000, load_duration=3_500_000_000))
+    stats.add(counted("{}", done_reason="length", prompt_eval_count=500, eval_count=None))
+    stats.add(reply("{}"))  # a reply without counters (as the test fakes send) still counts
+
+    assert stats.to_dict() == {"calls": 3, "prompt_tokens": 1500, "output_tokens": 240,
+                               "prompt_seconds": 2.0, "output_seconds": 20.0,
+                               "load_seconds": 3.5, "truncated": 1, "output_speed": 12.0}
+
+
+def test_stats_speed_without_output_time():
+    assert summarize.LLMStats().output_speed == 0.0
+
+
+def test_ask_counts_the_retry(chat_calls):
+    chat_calls.queue = ["{}", EXTRACTION.model_dump_json()]
+    stats = summarize.LLMStats()
+    summarize.ask("prompt", ChunkExtraction, stats)
+    assert stats.calls == 2
+
+
+def test_save_stats_keeps_other_steps(tmp_path):
+    (tmp_path / "meta.json").write_text(json.dumps({"id": "x", "llm": {"extract": {"calls": 6}}}))
+    summarize.save_stats(tmp_path, "merge", summarize.LLMStats(calls=1))
+    llm = json.loads((tmp_path / "meta.json").read_text())["llm"]
+    assert llm["extract"] == {"calls": 6}
+    assert llm["merge"]["calls"] == 1
+    assert llm["merge"]["model"] == config.LLM_MODEL
+
+
+# --- packing Whisper's segments into lines ------------------------------------------
+
+def seg(start, end, text):
+    return Segment(start, end, text)
+
+
+def test_pack_ends_lines_at_a_sentence_end():
+    lines = summarize.pack_segments([
+        seg(0, 3, " Buenos días,"), seg(3, 6, " vecinos."),       # 6 s: too short to end here
+        seg(6, 11, " Les cuento."),                              # 11 s + sentence end: line 1
+        seg(11, 14, " este,"), seg(14, 16, "  "), seg(16, 22, " la luz,"),
+        seg(22, 30, " y el agua,"), seg(30, 33, " ya."),         # 19 s, no end yet... 22 s: cut
+    ], seconds=10)
+    assert [(l.start, l.end, l.text) for l in lines] == [
+        (0, 11, "Buenos días, vecinos. Les cuento."),
+        (11, 33, "este, la luz, y el agua, ya."),
+    ]
+
+
+def test_pack_cuts_runaway_lines_and_keeps_the_rest():
+    lines = summarize.pack_segments([seg(0, 15, " uno"), seg(15, 21, " dos"), seg(21, 23, " tres")],
+                                    seconds=10)
+    assert [l.text for l in lines] == ["uno dos", "tres"]  # 21 s ≥ 2 × 10 without a sentence end
+
+
+def test_pack_uses_config_and_handles_nothing(monkeypatch):
+    monkeypatch.setattr(config, "LINE_SECONDS", 100)
+    assert len(summarize.pack_segments([seg(0, 30, " a."), seg(30, 60, " b.")])) == 1
+    assert summarize.pack_segments([]) == []
+
+
+def test_extract_sends_packed_lines(chat_calls, tmp_path):
+    folder = tmp_path / "memo"
+    folder.mkdir()
+    (folder / "segments.json").write_text(json.dumps(
+        [{"start": s, "end": s + 3, "text": f" palabra{n}"} for n, s in enumerate(range(0, 30, 3))]))
+    (folder / "meta.json").write_text(json.dumps({"id": "x", "language": "es"}))
+    summarize.extract(folder)
+    prompt = chat_calls[0]["messages"][0]["content"]
+    assert "[00:00] palabra0 palabra1 palabra2 palabra3 palabra4 palabra5 palabra6\n" in prompt
+
+
+def test_sentence_drops_stray_cjk():
+    assert summarize._sentence("Participación de圳 la comunidad", period=True) == \
+        "Participación de la comunidad."

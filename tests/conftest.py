@@ -33,3 +33,12 @@ def not_audio(tmp_path):
     path = tmp_path / "broken.m4a"
     path.write_bytes(b"this is not audio")
     return path
+
+
+@pytest.fixture
+def no_thresholds(monkeypatch):
+    """Tiny made-up memos (seconds long): no line packing, no topic or tangent minimums."""
+    from crc_memo import config
+    monkeypatch.setattr(config, "LINE_SECONDS", 0)
+    monkeypatch.setattr(config, "MIN_TOPIC_SECONDS", 0)
+    monkeypatch.setattr(config, "MIN_TANGENT_SECONDS", 0)

@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from crc_memo import config, ingest, summarize, transcribe
+from crc_memo import config, ingest, output, summarize, transcribe
 
 app = typer.Typer(
     help="Transcribe and summarize voice memos, locally.",
@@ -52,11 +52,10 @@ def process(
         _transcribe_step(result.folder, lang)
         _extract_step(result.folder)
         _merge_step(result.folder)
+        _write_step(result.folder)
     except (ingest.IngestError, transcribe.TranscribeError, summarize.SummarizeError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
-
-    _todo("Phase 3")
 
 
 def _transcribe_step(folder: Path, lang: str | None) -> None:
@@ -101,12 +100,30 @@ def _transcribe_step(folder: Path, lang: str | None) -> None:
         console.print("[dim]Check those spots; if loops are common we'll tune Whisper.[/dim]")
 
 
+def _llm_stats(stats: summarize.LLMStats) -> None:
+    """One line on where a step's LLM time went (reading the prompt vs writing the answer)."""
+    if not stats.calls:
+        return
+    fmt = transcribe.format_timestamp
+    console.print(
+        f"[dim]  {stats.calls} LLM calls · read {stats.prompt_tokens:,} tokens in "
+        f"{fmt(stats.prompt_seconds)} · wrote {stats.output_tokens:,} tokens in "
+        f"{fmt(stats.output_seconds)} ({stats.output_speed:.1f} tokens/s)"
+        + (f" · model load {fmt(stats.load_seconds)}" if stats.load_seconds >= 1 else "")
+        + "[/dim]"
+    )
+    if stats.truncated:
+        console.print(f"[yellow]⚠ {stats.truncated} replies hit the output limit "
+                      f"(LLM_MAX_OUTPUT_TOKENS={config.LLM_MAX_OUTPUT_TOKENS})[/yellow]")
+
+
 def _extract_step(folder: Path) -> None:
     if summarize.is_extracted(folder):
         console.print("Already extracted")
         return
 
     started = time.monotonic()
+    stats = summarize.LLMStats()
     with Progress(
         TextColumn(f"Extracting meeting notes with [bold]{config.LLM_MODEL}[/bold]"),
         BarColumn(),
@@ -116,7 +133,7 @@ def _extract_step(folder: Path) -> None:
     ) as progress:
         task = progress.add_task("extract", total=None)
         results = summarize.extract(
-            folder, lambda done, total: progress.update(task, completed=done, total=total)
+            folder, lambda done, total: progress.update(task, completed=done, total=total), stats
         )
     elapsed = transcribe.format_timestamp(time.monotonic() - started)
     count = lambda field: sum(len(getattr(r, field)) for r in results)
@@ -126,6 +143,7 @@ def _extract_step(folder: Path) -> None:
         f"{count('pending')} pending (before merging) → "
         f"{folder / summarize.EXTRACTIONS_NAME}"
     )
+    _llm_stats(stats)
 
 
 def _merge_step(folder: Path) -> None:
@@ -134,8 +152,9 @@ def _merge_step(folder: Path) -> None:
         return
 
     started = time.monotonic()
+    stats = summarize.LLMStats()
     with console.status("Merging chunks and removing duplicates…"):
-        minutes, removed = summarize.merge(folder)
+        minutes, removed = summarize.merge(folder, stats)
     elapsed = transcribe.format_timestamp(time.monotonic() - started)
     console.print(
         f"[green]Merged[/green] in {elapsed} · removed {removed} duplicates → "
@@ -143,6 +162,35 @@ def _merge_step(folder: Path) -> None:
         f"{len(minutes.commitments)} commitments · {len(minutes.pending)} pending → "
         f"{folder / summarize.MINUTES_NAME}"
     )
+    _llm_stats(stats)
+
+
+def _write_step(folder: Path) -> None:
+    """The prose costs LLM calls, so it's reused; rendering is instant, so it always reruns."""
+    if summarize.is_written(folder):
+        console.print("Prose already written")
+    else:
+        started = time.monotonic()
+        stats = summarize.LLMStats()
+        with Progress(
+            TextColumn(f"Writing the minuta with [bold]{config.LLM_MODEL}[/bold]"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("write", total=None)
+            summarize.write(
+                folder, lambda done, total: progress.update(task, completed=done, total=total),
+                stats,
+            )
+        elapsed = transcribe.format_timestamp(time.monotonic() - started)
+        console.print(f"[green]Wrote[/green] the prose in {elapsed} → "
+                      f"{folder / summarize.PROSE_NAME}")
+        _llm_stats(stats)
+
+    for path in output.write(folder):
+        console.print(f"[green]Minuta[/green] → {path}")
 
 
 @app.command("list")

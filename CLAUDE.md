@@ -10,11 +10,18 @@ transcribes them locally, and produces:
    Both are rendered from `minutes.json` (the contract; see `.claude/rules/output-format.md`).
 
 **Who the memos come from:** mostly **elderly people retelling a meeting** they attended
-(community, association, committee…) as a long WhatsApp audio **sent to a group**. I'm one
-of the recipients, not the speaker. So the output is a **minuta**: commitments belong to the
-people named, or are flagged `for_recipients` when the speaker asks whoever receives the
-audio ("usted", "ustedes", "les pido a todos"). Expect slow speech, digressions, repetition
-and older/rural Costa Rican vocabulary. Keep the tone respectful; never "correct" the speaker.
+(community, association, committee…) as a long WhatsApp audio **sent to a group** — or the
+group's **spokesperson reporting back** to the people they represent (says "ustedes" in every
+sentence; makes promises of their own). I'm one of the recipients, not the speaker.
+So the output is a **minuta**: each commitment has an `owner` — a person named, the speaker
+(their own promise), the recipients (only on an explicit ask: "traigan", "les pido que
+firmen"), or nobody. Expect slow speech, digressions, repetition and older/rural Costa Rican
+vocabulary. Keep the tone respectful; never "correct" the speaker.
+
+**The tool drafts, a human reviews.** The minuta does the heavy lifting; someone reads it
+before it goes to the group. The minuta completa (with [mm:ss] to check against the audio)
+is the reference. So "good enough" means: saves the reviewer most of the work, and its
+mistakes are easy to spot and verify — not perfect.
 
 Outputs go to an **Obsidian vault** (markdown with properties, `[[links]]` and task checkboxes,
 so Obsidian provides search and cross-meeting tracking) plus a **PDF** to share with the group.

@@ -40,9 +40,13 @@ minutes (an *acta*): executive summary + detailed report.
 - **3d** Wire into `memo process` (resumes where it stopped), `memo reprocess ID [--from step]`
   for prompt/model iteration, `--sender` / `--date` overrides (date also read from WhatsApp
   file names like `PTT-20261005-WA0003.opus`), clear errors when Ollama/model are missing.
-- **3e** Tune on 3–4 real memos with before/after output.
+- **3e** Tune on 3–4 real memos with before/after output. Round 1 (27-min spokesperson memo)
+  done: owner roles + a focused owner check, line packing, topic/tangent minimums, most
+  specific next meeting. Next: more memos (an elderly retelling) rather than more rounds on
+  one, to avoid overfitting to one speaker.
 - Empty glossary step for now — filled in Phase 3.5 only if summaries show it's needed.
-- **Done when:** both docs are genuinely useful on 3–4 real memos (mostly Spanish ones).
+- **Done when:** both docs are genuinely useful on 3–4 real memos (mostly Spanish ones):
+  a reviewer can fix the draft quickly using the completa's [mm:ss] — not perfect output.
 
 ## Phase 3.5 — Glossary checkpoint (after summaries exist)
 Judged by its *effect*, not by match lists: the same memo through `memo reprocess` with and

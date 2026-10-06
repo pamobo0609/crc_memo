@@ -74,6 +74,9 @@ def test_process_ingests_and_transcribes(audio_files, memos_dir):
     assert (folder / "extractions.json").exists()
     assert "Merged" in result.output
     assert (folder / "minutes.json").exists()
+    assert "Wrote the prose" in result.output
+    assert (folder / "minuta_breve.md").read_text().startswith("# Minuta — Reunión")
+    assert (folder / "minuta_completa.md").exists()
 
 
 def test_process_warns_about_loops(audio_files, monkeypatch):
@@ -98,6 +101,8 @@ def test_process_twice_skips_both_steps(audio_files, whisper_calls):
     assert "Already transcribed" in second.output
     assert "Already extracted" in second.output
     assert "Already merged" in second.output
+    assert "Prose already written" in second.output
+    assert "Minuta → " in second.output  # rendering always reruns
     assert len(whisper_calls) == 1  # Whisper ran only the first time
 
 
@@ -159,3 +164,33 @@ def test_process_reports_llm_error(audio_files, monkeypatch):
     result = runner.invoke(app, ["process", str(audio_files[".m4a"])])
     assert result.exit_code == 1
     assert "brew services start ollama" in result.output
+
+
+def test_process_prints_llm_stats(audio_files, monkeypatch):
+    def fake(messages, schema):
+        return SimpleNamespace(
+            message=SimpleNamespace(content=EMPTY_EXTRACTION), done_reason="length",
+            prompt_eval_count=1234, prompt_eval_duration=2_000_000_000,
+            eval_count=120, eval_duration=10_000_000_000, load_duration=4_000_000_000,
+        )
+
+    monkeypatch.setattr(summarize, "_chat", fake)
+    result = runner.invoke(app, ["process", str(audio_files[".ogg"])])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())  # rich wraps long lines at the terminal width
+    assert ("1 LLM calls · read 1,234 tokens in 00:02 · wrote 120 tokens in 00:10 "
+            "(12.0 tokens/s) · model load 00:04") in output
+    assert "⚠ 1 replies hit the output limit" in output
+
+
+def test_process_hides_tiny_model_load(audio_files, monkeypatch):
+    def fake(messages, schema):
+        return SimpleNamespace(message=SimpleNamespace(content=EMPTY_EXTRACTION),
+                               eval_count=10, eval_duration=1_000_000_000, load_duration=50_000_000)
+
+    monkeypatch.setattr(summarize, "_chat", fake)
+    result = runner.invoke(app, ["process", str(audio_files[".ogg"])])
+    assert "(10.0 tokens/s)" in " ".join(result.output.split())
+    assert "model load" not in result.output
+    assert "output limit" not in result.output

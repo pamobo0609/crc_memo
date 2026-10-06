@@ -15,8 +15,11 @@ OUTPUT_DIR = Path.home() / "Google Drive" / "Memos"
 # Models
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 # Short natural sentence with names/slang Whisper tends to misspell (max ~220 tokens).
-# Seeded in Phase 3.5 from real transcripts; None = no hint.
-WHISPER_INITIAL_PROMPT: str | None = None
+# Seeded in Phase 3.5 from real transcripts; None = no hint. Public terms only (the repo is
+# public): real names go in the gitignored glossary.
+# ICE = Instituto Costarricense de Electricidad: Whisper wrote "ise", "hice", "elice", "el lice"
+# (and the LLM made "Elice" a person); "monofásico" came out as "mono fácil" / "mono básico".
+WHISPER_INITIAL_PROMPT: str | None = "Reunión con el ICE sobre la luz: monofásico o trifásico."
 LLM_MODEL = "qwen3:14b"
 
 # Ollama's default context window is small and silently truncates input.
@@ -30,6 +33,15 @@ LLM_MAX_OUTPUT_TOKENS = 2048  # cap per call; at ~12 tokens/s that's under 3 min
 
 # Transcript chunks sent to the LLM one at a time (~1.2k tokens of Spanish speech each).
 CHUNK_SECONDS = 300
+# Whisper's segments are packed into transcript lines of about this many seconds before the
+# LLM sees them. With an initial_prompt Whisper cut a 27-min memo into 967 tiny segments
+# ("[16:55] este,"): a timestamp every 2 words costs tokens and makes the text choppy.
+LINE_SECONDS = 10
+# Shorter topics join their neighbour: a 20-second "topic" is a remark inside the one around
+# it, and each topic costs one LLM call when writing the minuta.
+MIN_TOPIC_SECONDS = 60
+# Shorter digressions aren't listed: nobody needs to skip 4 seconds.
+MIN_TANGENT_SECONDS = 15
 
 # Prompts live as .md files next to the code, loaded at runtime.
 PROMPTS_DIR = Path(__file__).parent / "prompts"
