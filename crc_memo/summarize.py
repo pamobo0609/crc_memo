@@ -1,10 +1,12 @@
 """Summarize: segments.json -> meeting minutes.
 
-Step 3a (this file so far): split the transcript into ~5-minute chunks and extract each one
-to structured JSON with the local LLM. Later steps merge the chunks and write the reports.
+3a extract: split the transcript into ~5-minute chunks; the local LLM extracts each to JSON.
+3b merge:   combine the chunks and remove duplicates (the LLM only groups; code merges).
+Later steps write the reports.
 """
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -13,10 +15,23 @@ import ollama
 from pydantic import BaseModel, ValidationError
 
 from crc_memo import config
-from crc_memo.schemas import ChunkExtraction
+from crc_memo.schemas import (
+    ActionItem,
+    ChunkExtraction,
+    Merged,
+    MergedAction,
+    MergedPoint,
+    MergePlan,
+    Point,
+    Tangent,
+)
 from crc_memo.transcribe import SEGMENTS_NAME, Segment, format_timestamp
 
 EXTRACTIONS_NAME = "extractions.json"
+MERGED_NAME = "merged.json"
+MERGE_FIELDS = ["decisions", "action_items", "open_questions", "notable"]
+VAGUE = {"sin asignar", "sin fecha", ""}  # owner/due values that a later mention can improve
+NOT_PARTICIPANTS = {"usted", "speaker", "el speaker", "la speaker", "hablante", "la hablante"}
 
 # Conservative chars-per-token for the budget check (Spanish speech measured ~3.3; lower is safer).
 CHARS_PER_TOKEN = 2.5
@@ -176,3 +191,151 @@ def extract(
         [{"range": c.range, **r.model_dump()} for c, r in zip(chunks, results)],
     )
     return results
+
+
+# --- 3b merge -------------------------------------------------------------------
+
+def timestamp_seconds(timestamp: str) -> float:
+    """'05:42' -> 342, '1:02:05' -> 3725; anything unparseable sorts last."""
+    try:
+        parts = [int(p) for p in timestamp.strip().split(":")]
+    except ValueError:
+        return float("inf")
+    total = 0
+    for part in parts:
+        total = total * 60 + part
+    return total
+
+
+def _key(text: str) -> str:
+    """Comparison key: lowercase words only, ignoring '(roles)' in parentheses."""
+    return " ".join(re.findall(r"\w+", re.sub(r"\(.*?\)", "", text).lower()))
+
+
+def _union(labels: list[str]) -> list[str]:
+    """Ordered union; 'don Carlos' and 'Don Carlos (presidente)' collapse to the longer one."""
+    seen: dict[str, str] = {}
+    for label in labels:
+        key = _key(label)
+        if key and (key not in seen or len(label) > len(seen[key])):
+            seen[key] = label
+    return list(seen.values())
+
+
+def _range_bounds(range_: str) -> tuple[str, str]:
+    """'01:10–01:18' (or with '-') -> ('01:10', '01:18'); a single time is both bounds."""
+    start, _, end = range_.replace("-", "–").partition("–")
+    return start.strip(), (end or start).strip()
+
+
+def _merge_tangents(tangents: list[Tangent]) -> list[Tangent]:
+    """The same digression seen by two overlapping chunks becomes one (overlapping ranges)."""
+    merged: list[Tangent] = []
+    for t in sorted(tangents, key=lambda t: timestamp_seconds(_range_bounds(t.range)[0])):
+        start, end = _range_bounds(t.range)
+        if merged:
+            last_start, last_end = _range_bounds(merged[-1].range)
+            if timestamp_seconds(start) <= timestamp_seconds(last_end):
+                if timestamp_seconds(end) > timestamp_seconds(last_end):
+                    merged[-1].range = f"{last_start}–{end}"
+                continue
+        merged.append(t.model_copy())
+    return merged
+
+
+def _repair(groups: list[list[int]], count: int) -> list[list[int]]:
+    """Make the LLM's grouping safe: drop unknown or repeated numbers, add missing ones alone."""
+    seen: set[int] = set()
+    repaired = []
+    for group in groups:
+        clean = [i for i in dict.fromkeys(group) if 1 <= i <= count and i not in seen]
+        seen.update(clean)
+        if clean:
+            repaired.append(clean)
+    return repaired + [[i] for i in range(1, count + 1) if i not in seen]
+
+
+def _combine(items: list[Point] | list[ActionItem]) -> MergedPoint | MergedAction:
+    """One merged item: earliest wording and quote, every timestamp, most specific owner/due."""
+    items = sorted(items, key=lambda i: timestamp_seconds(i.timestamp))
+    first = items[0]
+    timestamps = list(dict.fromkeys(i.timestamp for i in items))
+    if isinstance(first, ActionItem):
+        specific = lambda field: next(
+            (getattr(i, field) for i in items if getattr(i, field) not in VAGUE), getattr(first, field)
+        )
+        return MergedAction(timestamps=timestamps, quote=first.quote, task=first.task,
+                            owner=specific("owner"), due=specific("due"))
+    return MergedPoint(timestamps=timestamps, quote=first.quote, text=first.text)
+
+
+def _describe(field: str, item: Point | ActionItem) -> str:
+    if field == "action_items":
+        return f"({item.timestamp}) {item.owner} · {item.due} · {item.task}"
+    return f"({item.timestamp}) {item.text}"
+
+
+def _merge_plan(pools: dict[str, list]) -> MergePlan:
+    """Ask the LLM which items are the same fact. Returns number groups (1-based)."""
+    sections = []
+    for field in MERGE_FIELDS:
+        lines = [f"[{n}] {_describe(field, item)}" for n, item in enumerate(pools[field], 1)]
+        sections.append(f"## {field}\n" + ("\n".join(lines) or "(none)"))
+    return ask(load_prompt("merge", items="\n\n".join(sections)), MergePlan)
+
+
+def _drop_covered(notable: list[MergedPoint], tangents: list[Tangent],
+                  meetings: list) -> list[MergedPoint]:
+    """Each fact belongs in one field: drop `notable` items that just repeat a tangent (same
+    time range) or the next meeting (same timestamp). The model does this despite the prompt."""
+    meeting_times = {m.timestamp for m in meetings}
+
+    def covered(point: MergedPoint) -> bool:
+        at = timestamp_seconds(point.timestamps[0])
+        in_tangent = any(
+            timestamp_seconds(start) <= at <= timestamp_seconds(end)
+            for start, end in (_range_bounds(t.range) for t in tangents)
+        )
+        return in_tangent or point.timestamps[0] in meeting_times
+
+    return [p for p in notable if not covered(p)]
+
+
+def is_merged(folder: Path) -> bool:
+    return (folder / MERGED_NAME).exists()
+
+
+def merge(folder: Path) -> tuple[Merged, int]:
+    """Combine extractions.json into merged.json. Returns (merged, duplicates removed)."""
+    chunks = [ChunkExtraction.model_validate(c)
+              for c in json.loads((folder / EXTRACTIONS_NAME).read_text())]
+    pools = {field: [item for c in chunks for item in getattr(c, field)] for field in MERGE_FIELDS}
+
+    # One chunk: extraction already listed each fact once, so there is nothing to group.
+    needs_llm = len(chunks) > 1 and any(len(items) > 1 for items in pools.values())
+    plan = _merge_plan(pools) if needs_llm else MergePlan(**{
+        field: [{"fact": "", "items": [n]} for n in range(1, len(pools[field]) + 1)]
+        for field in MERGE_FIELDS
+    })
+
+    merged_items = {}
+    for field in MERGE_FIELDS:
+        groups = _repair([g.items for g in getattr(plan, field)], len(pools[field]))
+        combined = [_combine([pools[field][i - 1] for i in group]) for group in groups]
+        merged_items[field] = sorted(combined, key=lambda m: timestamp_seconds(m.timestamps[0]))
+
+    meetings = sorted((m for c in chunks for m in c.next_meeting),
+                      key=lambda m: timestamp_seconds(m.timestamp))
+    tangents = _merge_tangents([t for c in chunks for t in c.tangents])
+    merged_items["notable"] = _drop_covered(merged_items["notable"], tangents, meetings)
+    merged = Merged(
+        topics=_union([t for c in chunks for t in c.topics]),
+        participants=[p for p in _union([p for c in chunks for p in c.participants])
+                      if _key(p) not in NOT_PARTICIPANTS],
+        tangents=tangents,
+        next_meeting=meetings[-1:],  # the last mention is usually the final word
+        **merged_items,
+    )
+    _write_json(folder / MERGED_NAME, merged.model_dump())
+    removed = sum(len(pools[f]) - len(merged_items[f]) for f in MERGE_FIELDS)
+    return merged, removed

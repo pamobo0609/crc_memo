@@ -72,6 +72,8 @@ def test_process_ingests_and_transcribes(audio_files, memos_dir):
     assert stats["warnings"] == []
     assert "Extracted 1 chunks" in result.output
     assert (folder / "extractions.json").exists()
+    assert "Merged" in result.output
+    assert (folder / "merged.json").exists()
 
 
 def test_process_warns_about_loops(audio_files, monkeypatch):
@@ -95,6 +97,7 @@ def test_process_twice_skips_both_steps(audio_files, whisper_calls):
     assert "Already ingested" in second.output
     assert "Already transcribed" in second.output
     assert "Already extracted" in second.output
+    assert "Already merged" in second.output
     assert len(whisper_calls) == 1  # Whisper ran only the first time
 
 

@@ -51,6 +51,7 @@ def process(
         console.print(f"{status} [bold]{result.memo_id}[/bold] → {result.folder}")
         _transcribe_step(result.folder, lang)
         _extract_step(result.folder)
+        _merge_step(result.folder)
     except (ingest.IngestError, transcribe.TranscribeError, summarize.SummarizeError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -124,6 +125,22 @@ def _extract_step(folder: Path) -> None:
         f"{count('decisions')} decisions · {count('action_items')} tasks · "
         f"{count('open_questions')} open questions (before merging) → "
         f"{folder / summarize.EXTRACTIONS_NAME}"
+    )
+
+
+def _merge_step(folder: Path) -> None:
+    if summarize.is_merged(folder):
+        console.print("Already merged")
+        return
+
+    started = time.monotonic()
+    with console.status("Merging chunks and removing duplicates…"):
+        merged, removed = summarize.merge(folder)
+    elapsed = transcribe.format_timestamp(time.monotonic() - started)
+    console.print(
+        f"[green]Merged[/green] in {elapsed} · removed {removed} duplicates → "
+        f"{len(merged.decisions)} decisions · {len(merged.action_items)} tasks · "
+        f"{len(merged.open_questions)} open questions → {folder / summarize.MERGED_NAME}"
     )
 
 

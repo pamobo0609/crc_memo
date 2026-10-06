@@ -62,3 +62,49 @@ class ChunkExtraction(BaseModel):
     notable: list[Point] = Field(description="other important facts worth knowing")
     tangents: list[Tangent] = Field(description="digressions unrelated to the meeting, safe to skip")
     next_meeting: list[NextMeeting] = Field(description="the next meeting, if mentioned: 0 or 1 items")
+
+
+# --- Merge (3b) ---------------------------------------------------------------
+# The LLM only groups item numbers; code builds the merged items, so merging can't change
+# a name, amount or quote.
+
+GROUPS = "one group per distinct fact; every item number appears in exactly one group"
+
+
+class Group(BaseModel):
+    # The fact comes first (evidence first, again): naming *what* the group is before
+    # choosing its numbers stopped bare-number answers from mixing up facts.
+    fact: Sentence = Field(description="the single fact these items state, in one short sentence")
+    items: list[int] = Field(description="numbers of the items that state exactly this fact")
+
+
+class MergePlan(BaseModel):
+    decisions: list[Group] = Field(description=GROUPS)
+    action_items: list[Group] = Field(description=GROUPS)
+    open_questions: list[Group] = Field(description=GROUPS)
+    notable: list[Group] = Field(description=GROUPS)
+
+
+class MergedPoint(BaseModel):
+    timestamps: list[str]  # every time the point was mentioned, in order
+    quote: str
+    text: str
+
+
+class MergedAction(BaseModel):
+    timestamps: list[str]
+    quote: str
+    task: str
+    owner: str
+    due: str
+
+
+class Merged(BaseModel):
+    topics: list[str]
+    participants: list[str]
+    decisions: list[MergedPoint]
+    action_items: list[MergedAction]
+    open_questions: list[MergedPoint]
+    notable: list[MergedPoint]
+    tangents: list[Tangent]
+    next_meeting: list[NextMeeting]

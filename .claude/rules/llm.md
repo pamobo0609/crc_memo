@@ -52,3 +52,15 @@ claim, grounding it instead of inventing a quote afterwards.
 }
 ```
 `next_meeting` is a list of 0 or 1 items (simpler for constrained decoding than a nullable object).
+
+## Merge (3b) — the LLM groups, code merges
+- The merge prompt lists numbered items per field; the LLM returns `{fact, items}` groups only.
+  Writing the **fact before the numbers** fixed wrong groupings that bare `[[1, 4], …]` had.
+- Code builds merged items: earliest wording/quote, **all** timestamps, most specific
+  owner/due (not "sin asignar"/"sin fecha"). Merging can't change names, amounts or quotes.
+- Bad groupings are repaired, never fatal: unknown/repeated numbers dropped, missing ones alone.
+- Deterministic parts stay in code: participant/topic union, tangent ranges, next meeting =
+  last mention, `notable` items repeating a tangent or the next meeting are dropped.
+- One chunk → no LLM call (extraction already lists each fact once).
+- Known extraction issue at chunk boundaries (seen with 60 s chunks): invented "unresolved"
+  questions when the answer lands in the next chunk. Re-check on real 5-min chunks in 3e.
