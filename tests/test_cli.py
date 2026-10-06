@@ -148,7 +148,7 @@ def test_process_rejects_missing_file(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "args", [["list"], ["search", "brete"], ["show", "abc"], ["todos"], ["reprocess", "abc"]]
+    "args", [["list"], ["search", "brete"], ["show", "abc"], ["todos"]]
 )
 def test_unimplemented_commands_say_so(args):
     result = runner.invoke(app, args)
@@ -194,3 +194,108 @@ def test_process_hides_tiny_model_load(audio_files, monkeypatch):
     assert "(10.0 tokens/s)" in " ".join(result.output.split())
     assert "model load" not in result.output
     assert "output limit" not in result.output
+
+
+# --- sender / date / reprocess ---------------------------------------------------------
+
+@pytest.fixture
+def memo(audio_files, memos_dir, tmp_path):
+    """A memo processed end to end (fake Whisper + LLM), from a WhatsApp-named file."""
+    path = tmp_path / "WhatsApp Audio 2026-09-27 at 08.53.52.ogg"
+    path.write_bytes(audio_files[".ogg"].read_bytes())
+    assert runner.invoke(app, ["process", str(path)]).exit_code == 0
+    (folder,) = memos_dir.iterdir()
+    return folder
+
+
+def test_date_comes_from_the_whatsapp_file_name(memo):
+    assert "según el audio del 27 sep 2026" in (memo / "minuta_breve.md").read_text()
+
+
+def test_process_with_sender_and_date(audio_files, memos_dir):
+    result = runner.invoke(app, ["process", str(audio_files[".ogg"]),
+                                 "--sender", "Marta", "--date", "2026-10-05"])
+    assert result.exit_code == 0, result.output
+    (folder,) = memos_dir.iterdir()
+    text = (folder / "minuta_breve.md").read_text()
+    assert "según el audio del 5 oct 2026" in text and "**Relato de:** Marta" in text
+
+
+def test_invalid_date_is_rejected(audio_files):
+    result = runner.invoke(app, ["process", str(audio_files[".ogg"]), "--date", "5/10/2026"])
+    assert result.exit_code == 2
+    assert "YYYY-MM-DD" in result.output
+
+
+def test_reprocess_reruns_from_extract_and_keeps_history(memo, llm_calls):
+    before = len(llm_calls)
+    result = runner.invoke(app, ["reprocess", memo.name[:4]])  # a unique prefix is enough
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Previous outputs saved" in output
+    assert f"Rerunning {memo.name} from extract" in output
+    assert "Extracted 1 chunks" in output and "Merged" in output
+    assert len(llm_calls) == before + 1  # the empty extraction needs no merge/write calls
+    (archive,) = (memo / "history").iterdir()
+    assert sorted(p.name for p in archive.iterdir()) == [
+        "extractions.json", "meta.json", "minuta_breve.md", "minuta_completa.md",
+        "minutes.json", "prose.json"]
+
+
+def test_reprocess_from_merge_keeps_earlier_steps(memo, llm_calls):
+    result = runner.invoke(app, ["reprocess", memo.name, "--from", "merge"])
+    assert "Already extracted" in result.output
+    assert "Merged" in result.output
+
+
+def test_sender_alone_only_rerenders(memo, llm_calls):
+    before = len(llm_calls)
+    result = runner.invoke(app, ["reprocess", memo.name, "--sender", "Don Carlos"])
+
+    assert result.exit_code == 0, result.output
+    assert "from render" in result.output and "Prose already written" in result.output
+    assert len(llm_calls) == before
+    assert "**Relato de:** Don Carlos" in (memo / "minuta_breve.md").read_text()
+    assert json.loads((memo / "minutes.json").read_text())["source"]["sender"] == "Don Carlos"
+    assert json.loads((memo / "meta.json").read_text())["sender"] == "Don Carlos"
+
+
+def test_reprocess_without_outputs_archives_nothing(memo):
+    for name in ["extractions.json", "minutes.json", "prose.json", "minuta_breve.md",
+                 "minuta_completa.md"]:
+        (memo / name).unlink()
+    result = runner.invoke(app, ["reprocess", memo.name])
+    assert result.exit_code == 0
+    assert "Previous outputs saved" not in result.output
+    assert not (memo / "history").exists()
+
+
+@pytest.mark.parametrize("memo_id, message", [("zzz", "No memo 'zzz'"), ("", "No memo ''")])
+def test_reprocess_unknown_memo(memo, memo_id, message):
+    result = runner.invoke(app, ["reprocess", memo_id])
+    assert result.exit_code == 1
+    assert message in result.output
+
+
+def test_reprocess_ambiguous_prefix(memos_dir):
+    for name in ["abc111", "abc222"]:
+        (memos_dir / name).mkdir(parents=True)
+        (memos_dir / name / "meta.json").write_text("{}")
+    result = runner.invoke(app, ["reprocess", "abc"])
+    assert result.exit_code == 1
+    assert "matches several memos: abc111, abc222" in result.output
+
+
+def test_reprocess_needs_a_transcript(memos_dir):
+    (memos_dir / "abc111").mkdir(parents=True)
+    (memos_dir / "abc111" / "meta.json").write_text("{}")
+    result = runner.invoke(app, ["reprocess", "abc111"])
+    assert result.exit_code == 1
+    assert "isn't transcribed yet" in result.output
+
+
+def test_reprocess_without_memos_dir():
+    result = runner.invoke(app, ["reprocess", "abc"])
+    assert result.exit_code == 1
+    assert "No memo 'abc'" in result.output

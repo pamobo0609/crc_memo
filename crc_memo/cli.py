@@ -1,7 +1,10 @@
 """Command-line entry point. Commands are stubs until their phase lands."""
 
+import shutil
 import time
 from dataclasses import asdict
+from datetime import date, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +26,71 @@ def _todo(phase: str) -> None:
     console.print(f"[yellow]Not implemented yet[/yellow] (coming in {phase}).")
 
 
+class Step(str, Enum):
+    """Summarization steps, in order; `reprocess --from` reruns one and everything after it."""
+    extract = "extract"
+    merge = "merge"
+    write = "write"
+    render = "render"
+
+
+STEP_FILES = {
+    Step.extract: [summarize.EXTRACTIONS_NAME],
+    Step.merge: [summarize.MINUTES_NAME],
+    Step.write: [summarize.PROSE_NAME],
+    Step.render: [output.BREVE_NAME, output.COMPLETA_NAME],
+}
+HISTORY_DIR = "history"
+
+
+def _check_date(value: str | None) -> str | None:
+    if value is not None:
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise typer.BadParameter("use YYYY-MM-DD, e.g. 2026-10-05") from None
+    return value
+
+
+SENDER = typer.Option(None, "--sender", help="Who recorded the audio (shown in the minuta).")
+DATE = typer.Option(None, "--date", callback=_check_date,
+                    help="Date of the audio, YYYY-MM-DD. Default: from a WhatsApp file name.")
+
+
+def _set_details(folder: Path, sender: str | None, date_: str | None) -> None:
+    """Save --sender / --date in meta.json."""
+    values = {key: value for key, value in [("sender", sender), ("date", date_)] if value}
+    if values:
+        ingest.update_meta(folder, **values)
+
+
+def _summarize(folder: Path) -> None:
+    """Each step skips work already done, so this resumes wherever a memo stopped.
+    Sender/date only affect the header, so they're refreshed without any LLM call."""
+    summarize.refresh_source(folder)
+    _extract_step(folder)
+    _merge_step(folder)
+    _write_step(folder)
+
+
+def _archive_and_clear(folder: Path, first: Step) -> Path | None:
+    """Copy every current output to history/<time>/ (for before/after comparisons), then
+    delete the outputs of `first` and the steps after it so they run again."""
+    outputs = [folder / name for names in STEP_FILES.values() for name in names
+               if (folder / name).exists()]
+    if not outputs:
+        return None
+    archive = folder / HISTORY_DIR / datetime.now().strftime("%Y-%m-%d %H.%M.%S")
+    archive.mkdir(parents=True, exist_ok=True)
+    for path in [*outputs, folder / ingest.META_NAME]:
+        shutil.copy2(path, archive / path.name)
+    steps = list(Step)
+    for step in steps[steps.index(first):]:
+        for name in STEP_FILES[step]:
+            (folder / name).unlink(missing_ok=True)
+    return archive
+
+
 @app.command()
 def process(
     path: Optional[Path] = typer.Argument(
@@ -37,6 +105,8 @@ def process(
         "--lang",
         help="Language code (es, en, ...). Default: auto-detect from the first 30 seconds.",
     ),
+    sender: Optional[str] = SENDER,
+    date_: Optional[str] = DATE,
 ) -> None:
     """Transcribe and summarize an audio file."""
     if path is None:
@@ -49,10 +119,9 @@ def process(
         result = ingest.ingest(path, config.MEMOS_DIR)
         status = "Already ingested" if result.skipped else "[green]Ingested[/green]"
         console.print(f"{status} [bold]{result.memo_id}[/bold] → {result.folder}")
+        _set_details(result.folder, sender, date_)
         _transcribe_step(result.folder, lang)
-        _extract_step(result.folder)
-        _merge_step(result.folder)
-        _write_step(result.folder)
+        _summarize(result.folder)
     except (ingest.IngestError, transcribe.TranscribeError, summarize.SummarizeError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -223,6 +292,28 @@ def todos() -> None:
 
 
 @app.command()
-def reprocess(memo_id: str = typer.Argument(..., metavar="ID", help="Memo ID.")) -> None:
-    """Rerun summarization on an existing transcript."""
-    _todo("Phase 3")
+def reprocess(
+    memo_id: str = typer.Argument(..., metavar="ID", help="Memo ID (or a unique start of it)."),
+    from_: Optional[Step] = typer.Option(
+        None, "--from",
+        help="First step to rerun. Default: extract, or render when only --sender/--date change.",
+    ),
+    sender: Optional[str] = SENDER,
+    date_: Optional[str] = DATE,
+) -> None:
+    """Rerun summarization on a transcribed memo, e.g. after a prompt or model change.
+    Previous outputs are kept in the memo's history/ folder."""
+    try:
+        folder = ingest.find_memo(config.MEMOS_DIR, memo_id)
+        if not transcribe.is_transcribed(folder):
+            raise ingest.IngestError(f"{folder.name} isn't transcribed yet. Run: memo process")
+        _set_details(folder, sender, date_)
+        first = from_ or (Step.render if sender or date_ else Step.extract)
+        archive = _archive_and_clear(folder, first)
+        if archive:
+            console.print(f"Previous outputs saved → {archive}")
+        console.print(f"Rerunning [bold]{folder.name}[/bold] from [bold]{first.value}[/bold]")
+        _summarize(folder)
+    except (ingest.IngestError, summarize.SummarizeError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)

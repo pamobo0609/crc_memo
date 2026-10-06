@@ -113,10 +113,11 @@ audio file → ffmpeg (16kHz mono wav) → whisper (timestamped transcript)
 
 ## CLI commands (target)
 ```
-memo process [PATH]        # no PATH → native macOS file picker
+memo process [PATH] [--sender NAME] [--date YYYY-MM-DD]   # no PATH → macOS file picker
 memo list                  # date, title, duration, # open action items
 memo show ID [--exec|--full|--transcript]
-memo reprocess ID          # rerun summarization (e.g. after prompt/model change)
+memo reprocess ID [--from extract|merge|write|render] [--sender] [--date]
+                           # rerun summarization; old outputs kept in <memo>/history/
 ```
 
 ---

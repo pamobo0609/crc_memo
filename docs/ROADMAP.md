@@ -37,7 +37,7 @@ minutes (an *acta*): executive summary + detailed report.
 - **3c** Render the minuta breve + completa from `minutes.json`: the LLM writes only prose
   (title, resumen, desarrollo per topic) and code renders everything else (es/en labels,
   layout in `.claude/rules/output-format.md`).
-- **3d** Wire into `memo process` (resumes where it stopped), `memo reprocess ID [--from step]`
+- **3d** ✅ Wire into `memo process` (resumes where it stopped), `memo reprocess ID [--from step]`
   for prompt/model iteration, `--sender` / `--date` overrides (date also read from WhatsApp
   file names like `PTT-20261005-WA0003.opus`), clear errors when Ollama/model are missing.
 - **3e** Tune on 3–4 real memos with before/after output. Round 1 (27-min spokesperson memo)

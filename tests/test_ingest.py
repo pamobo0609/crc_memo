@@ -105,3 +105,22 @@ def test_pick_file_returns_chosen_path(monkeypatch):
 def test_pick_file_cancel_returns_none(monkeypatch):
     _fake_osascript(monkeypatch, 1)
     assert ingest.pick_file() is None
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("WhatsApp Audio 2026-09-27 at 08.53.52.opus", "2026-09-27"),
+    ("whatsapp ptt 2026-01-02 at 10.00.00.ogg", "2026-01-02"),
+    ("PTT-20261005-WA0003.opus", "2026-10-05"),
+    ("AUD-20250131-WA0001.m4a", "2025-01-31"),
+    ("PTT-20261305-WA0003.opus", None),  # month 13
+    ("memo_tico.m4a", None),
+    ("", None),
+])
+def test_date_from_name(name, expected):
+    assert ingest.date_from_name(name) == expected
+
+
+def test_update_meta(tmp_path):
+    (tmp_path / "meta.json").write_text('{"id": "x", "sender": "old"}')
+    assert ingest.update_meta(tmp_path, sender="Marta") == {"id": "x", "sender": "Marta"}
+    assert json.loads((tmp_path / "meta.json").read_text())["sender"] == "Marta"

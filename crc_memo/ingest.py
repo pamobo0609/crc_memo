@@ -2,14 +2,23 @@
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 ID_LENGTH = 12  # hex chars of the SHA-256; plenty to avoid collisions for personal use
 WAV_NAME = "audio.wav"
+META_NAME = "meta.json"
+
+# WhatsApp puts the date in exported file names: "WhatsApp Audio 2026-09-27 at 08.53.52.opus"
+# (shared from the app) and "PTT-20261005-WA0003.opus" (from the phone's storage).
+WHATSAPP_DATES = [
+    re.compile(r"WhatsApp (?:Audio|Ptt) (\d{4})-(\d{2})-(\d{2})", re.IGNORECASE),
+    re.compile(r"(?:PTT|AUD)-(\d{4})(\d{2})(\d{2})-WA", re.IGNORECASE),
+]
 
 
 class IngestError(Exception):
@@ -21,6 +30,36 @@ class IngestResult:
     memo_id: str
     folder: Path
     skipped: bool  # True when this exact file was already processed
+
+
+def date_from_name(name: str) -> str | None:
+    """The audio's date ('2026-09-27') from a WhatsApp file name, or None."""
+    for pattern in WHATSAPP_DATES:
+        if match := pattern.search(name):
+            try:
+                return date(*map(int, match.groups())).isoformat()
+            except ValueError:  # e.g. month 13: not a real date
+                return None
+    return None
+
+
+def update_meta(folder: Path, **values) -> dict:
+    """Set keys in the memo's meta.json; returns the updated meta."""
+    path = folder / META_NAME
+    meta = json.loads(path.read_text()) | values
+    path.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+    return meta
+
+
+def find_memo(memos_dir: Path, memo_id: str) -> Path:
+    """The folder of memo `memo_id`, which may be a unique prefix ("a8d8")."""
+    matches = sorted(memos_dir.glob(f"{memo_id}*")) if memo_id and memos_dir.is_dir() else []
+    matches = [m for m in matches if (m / META_NAME).exists()]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise IngestError(f"No memo {memo_id!r} in {memos_dir}")
+    raise IngestError(f"{memo_id!r} matches several memos: {', '.join(m.name for m in matches)}")
 
 
 def pick_file() -> Path | None:

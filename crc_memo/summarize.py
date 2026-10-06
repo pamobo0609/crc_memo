@@ -18,7 +18,7 @@ from typing import Callable, TypeVar
 import ollama
 from pydantic import BaseModel, ValidationError
 
-from crc_memo import config
+from crc_memo import config, ingest
 from crc_memo.schemas import (
     ChunkExtraction,
     Commitment,
@@ -498,11 +498,28 @@ def _covered(timestamp: str, tangents: list[Tangent], meeting_times: set[str]) -
     return _in_tangent(timestamp_seconds(timestamp), tangents) or timestamp in meeting_times
 
 
+def _details(meta: dict) -> dict:
+    """Sender and date: --sender / --date if given, else the date in a WhatsApp file name."""
+    return {"sender": meta.get("sender"),
+            "memo_date": meta.get("date") or ingest.date_from_name(meta.get("source_name", ""))}
+
+
 def _source(folder: Path, segments_end: float) -> Source:
     meta = json.loads((folder / "meta.json").read_text())
     seconds = meta.get("transcription", {}).get("audio_seconds", segments_end)
-    return Source(sender=meta.get("sender"), memo_date=meta.get("date"),
-                  duration=format_timestamp(seconds), language=meta.get("language", ""))
+    return Source(**_details(meta), duration=format_timestamp(seconds),
+                  language=meta.get("language", ""))
+
+
+def refresh_source(folder: Path) -> None:
+    """Copy sender/date from meta.json into minutes.json, if it exists: they only change the
+    header, so a --sender / --date fix needs no new LLM calls."""
+    if not is_merged(folder):
+        return
+    minutes = Minutes.model_validate_json((folder / MINUTES_NAME).read_text())
+    meta = json.loads((folder / "meta.json").read_text())
+    minutes.source = minutes.source.model_copy(update=_details(meta))
+    _write_json(folder / MINUTES_NAME, minutes.model_dump())
 
 
 def _specificity(m: NextMeeting) -> tuple:

@@ -107,10 +107,10 @@ uv run memo process              # no path → opens the macOS file picker
 
 | Command | Does | |
 |---|---|---|
-| `memo process [PATH] [--lang es]` | Ingest and transcribe a memo (summaries come next). No path → file picker. | ✅ ingest + transcribe |
+| `memo process [PATH] [--lang es] [--sender NAME] [--date YYYY-MM-DD]` | Ingest, transcribe and write the minuta (breve + completa). No path → file picker. Resumes where it stopped. The date is read from WhatsApp file names. | ✅ |
 | `memo list` | Processed memos: date, title, duration, open action items | planned |
 | `memo show ID [--exec\|--full\|--transcript]` | Print a memo's summary, report or transcript | planned |
-| `memo reprocess ID` | Re-run summarization (after changing a prompt or model) | planned |
+| `memo reprocess ID [--from extract\|merge\|write\|render]` | Re-run summarization (after changing a prompt or model). Previous outputs are kept in the memo's `history/`. `--sender`/`--date` alone only re-render. | ✅ |
 
 ## Where your data lives
 
