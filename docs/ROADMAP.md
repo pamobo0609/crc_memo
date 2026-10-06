@@ -58,7 +58,7 @@ without glossary entries.
 - The dictionary's older/rural vocabulary may suit elderly speakers better than expected.
 - **Done when:** the glossary measurably improves summaries — or we decide it isn't needed.
 
-## Phase 4 — Output: a traceable vault (private GitHub repo) + PDF
+## Phase 4 — Output: a traceable vault (private GitHub repo) + PDF ✅
 The vault is a private GitHub repo (free tier) of plain markdown that reads well on GitHub and
 in Obsidian (no app needed). Goal: **traceability** — human IDs, exact quotes with [mm:ss],
 provenance, and git history of every correction. Format and vault rules:
@@ -82,7 +82,8 @@ pushes; humans correct the markdown; ASCII PascalCase file names; sequential IDs
   gitignored in the vault. Option: a low-vision sans font (Atkinson Hyperlegible, OFL) would
   mean shipping font files.
 - **Done when:** a processed memo is published to the private repo with working links,
-  commitment notes and indexes, and its PDF reads well on a phone.
+  commitment notes and indexes, and its PDF reads well on a phone. ✅ M1 (27-min recap):
+  published, reviewed and corrected in the vault, PDF shared with the group.
 
 ## Phase 5 — History & search ✅ resolved: Obsidian covers it
 Obsidian's search (full text, properties like `[estado:abierto]`, tags, aliases), the

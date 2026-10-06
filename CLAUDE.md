@@ -135,7 +135,7 @@ before starting it.**
   — 27:42 Spanish memo in 1:10 (≈24× real time), 0 loops, usable accuracy
 - [ ] Phase 3 — Summarization: meeting minutes (chunk → extract → merge → full → exec, `reprocess`)
 - [ ] Phase 3.5 — Glossary checkpoint (judge dcaa.json by its effect on summaries)
-- [ ] Phase 4 — Output: traceable vault (private GitHub repo: Minuta.md, IDs M12-C3, evidence, `memo publish`, names, indexes, `vault check`) + PDF — 4a–4d built; done when the PDF reads well on a phone
+- [x] Phase 4 — Output: traceable vault (private GitHub repo: Minuta.md, IDs M12-C3, evidence, `memo publish`, names, indexes, `vault check`) + PDF for the group — first minuta (M1) published, reviewed and shared
 - [x] Phase 5 — History & search: resolved — Obsidian + generated indexes cover it (no SQLite)
 
 ## Context rules
