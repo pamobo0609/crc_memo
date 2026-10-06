@@ -287,12 +287,14 @@ def publish(
     if result.created:
         console.print(f"  {len(result.created)} new commitment notes in "
                       f"{vault.COMPROMISOS_DIR}/")
+    _report_git(result)
+
+
+def _report_git(result: vault.PublishResult | vault.UpdateResult) -> None:
     if result.warning:
         console.print(f"[yellow]⚠ {result.warning}[/yellow]")
-    elif result.pushed:
-        console.print("  committed and pushed")
     elif result.committed:
-        console.print("  committed (not pushed)")
+        console.print("  committed and pushed" if result.pushed else "  committed (not pushed)")
     else:
         console.print("  nothing changed")
 
@@ -341,14 +343,7 @@ def vault_update(
     for path in result.skipped:
         console.print(f"[yellow]⚠ skipped {path.name}: it has uncommitted changes. Commit them, "
                       "then run this again.[/yellow]")
-    if result.warning:
-        console.print(f"[yellow]⚠ {result.warning}[/yellow]")
-    elif result.pushed:
-        console.print("  committed and pushed")
-    elif result.committed:
-        console.print("  committed (not pushed)")
-    else:
-        console.print("  nothing changed")
+    _report_git(result)
 
 
 @app.command("list")

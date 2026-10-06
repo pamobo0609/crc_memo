@@ -391,3 +391,9 @@ def test_vault_update_error(monkeypatch):
     monkeypatch.delenv("CRC_MEMO_VAULT", raising=False)
     result = runner.invoke(app, ["vault", "update"])
     assert result.exit_code == 1 and "Set CRC_MEMO_VAULT" in result.output
+
+
+def test_a_push_without_a_commit_says_nothing_changed(vault_dir, monkeypatch):
+    monkeypatch.setattr(vault, "update", lambda path, push: vault.UpdateResult(pushed=True))
+    output = runner.invoke(app, ["vault", "update"]).output
+    assert "nothing changed" in output and "committed" not in output
