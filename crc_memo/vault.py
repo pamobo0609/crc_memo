@@ -392,7 +392,20 @@ QUOTE_RE = re.compile(r"«[^»]*»")
 def apply_names(text: str, names: dict[str, str]) -> tuple[str, dict[tuple[str, str], int]]:
     """Replace every listed variant with its correct name: whole words, case-insensitive,
     longest first (so "Mauro" never touches "don Mauro Arias"). Quotes «…» are left as said.
+    Repeats until nothing changes: "don Hansen" -> "don Hanzel" can itself be a variant of
+    "Hanzel", and one run must leave the final result (running it again changes nothing).
     Returns the new text and how many times each (found, correct) pair was replaced."""
+    changes: dict[tuple[str, str], int] = {}
+    for _ in range(10):  # correct names map to themselves, so this settles in a few passes
+        text, found = _apply_names_once(text, names)
+        if not found:
+            break
+        for pair, count in found.items():
+            changes[pair] = changes.get(pair, 0) + count
+    return text, changes
+
+
+def _apply_names_once(text: str, names: dict[str, str]) -> tuple[str, dict[tuple[str, str], int]]:
     if not names:
         return text, {}
     pattern = re.compile(r"(?<!\w)(" + "|".join(re.escape(n) for n in

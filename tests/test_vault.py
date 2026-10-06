@@ -485,3 +485,18 @@ def test_update_message_lists_each_rename_once(tmp_path, monkeypatch, repo):
     assert ("quienes reciben el audio", "Vecinos del barrio") in result.names
     assert git(repo, "log", "-1", "--format=%s") == \
         "Nombres: Quienes reciben el audio → Vecinos del barrio"
+
+
+
+def test_apply_names_settles_in_one_run():
+    names = {"hanzel": "Hanzel", "don hanzel": "Hanzel", "hansen": "Hanzel"}
+    once, changes = vault.apply_names("Habló don Hansen.", names)
+    assert once == "Habló Hanzel."  # not "don Hanzel", which is itself a variant
+    assert changes == {("Hansen", "Hanzel"): 1, ("don Hanzel", "Hanzel"): 1}
+    assert vault.apply_names(once, names) == (once, {})
+
+
+def test_apply_names_stops_on_a_cycle():
+    # name_map() never builds a cycle (a variant can't point to two names); the cap is a guard.
+    text, changes = vault.apply_names("a", {"a": "b", "b": "a"})
+    assert text in {"a", "b"} and sum(changes.values()) == 10
