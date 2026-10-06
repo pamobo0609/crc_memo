@@ -254,20 +254,73 @@ VAULT_README = """# Minutas
 Minutas de reuniones, generadas con [crc_memo](https://github.com/pamobo0609/crc_memo) a partir
 de audios de WhatsApp y revisadas por personas. **Repositorio privado.**
 
-- `Minutas/<año>/M12-<fecha>/Minuta.md`: la minuta. Cada punto tiene un código (M12-C3) y la
-  cita exacta con el minuto del audio donde se dijo: [03:45] «…». ⚠ = cita no encontrada en la
-  transcripción: revisar. `Transcripcion.md` al lado es la evidencia.
-- `Compromisos/<año>/M12-C3.md`: un archivo por compromiso. Para darle seguimiento, agregue
-  líneas en «Seguimiento» y cambie `estado` (abierto / cumplido / cancelado).
+## Qué hay aquí
+- `Minutas/<año>/M12-<fecha>/Minuta.md`: la minuta completa. Cada punto tiene un código
+  (M12-C3) y la cita exacta con el minuto del audio donde se dijo: [03:45] «…».
+  ⚠ = la cita no se encontró en la transcripción: revisar.
+- `Minutas/<año>/M12-<fecha>/MinutaBreve.md`: la versión corta para el grupo. Se genera desde
+  `Minuta.md`: **no la edite**, corrija la completa.
+- `Minutas/<año>/M12-<fecha>/Transcripcion.md`: lo que se dijo, minuto a minuto. Es la
+  evidencia: **no la edite**.
+- `Compromisos/<año>/M12-C3.md`: una nota por compromiso, con su estado y su seguimiento.
 - `Propietarios.md`: una fila por propietario (una pareja = dos filas con el mismo lote).
 - `Externos.md`: las demás personas e instituciones que aparecen en los audios.
 - `Configuracion.md`: ajustes de esta bóveda, por ejemplo cómo llamar a quienes reciben los
   audios (`destinatarios`, el nombre del grupo).
-- En `Propietarios.md` y `Externos.md`, «También dicen» lista cómo aparece cada nombre en las minutas (separado por `;`).
-  Corrija ahí una sola vez y corra `memo vault update`: el nombre correcto queda en todas las
-  minutas y compromisos. Las citas «…» no se tocan: son lo que se dijo.
 
-Para corregir una minuta, edite su `Minuta.md`: el historial de git guarda quién cambió qué.
+## Cómo actualizar, paso a paso
+Los comandos `memo …` se corren en una terminal, desde la carpeta de crc_memo, con
+`uv run` delante (por ejemplo `uv run memo vault update`). Los cambios hechos a mano se
+guardan con git: en la terminal (abajo) o con el plugin gratuito «Git» de Obsidian.
+
+```sh
+git add -A && git commit -m "qué cambió y por qué" && git push   # dentro de esta bóveda
+```
+
+### 1. Agregar una minuta nueva
+1. Procese el audio, con el nombre de quien lo envía si lo sabe:
+   `memo process "WhatsApp Audio 2026-01-15 at 10.00.00.opus" --sender "Nombre Apellido"`.
+   Tarda unos 15 minutos por media hora de audio.
+2. Publíquelo: `memo publish <id>` (el id lo muestra el paso anterior). Le da el siguiente
+   número (M13), escribe la minuta, la breve, la transcripción y una nota por compromiso, y
+   hace commit y push.
+3. En Obsidian, revise la minuta: primero los ⚠ y los responsables de cada compromiso.
+   Corrija lo que haga falta con el paso 2.
+
+### 2. Corregir una minuta ya publicada
+1. Abra su `Minuta.md` y corrija el texto (no toque las citas «…»: son lo que se dijo).
+2. Si cambió el responsable de un compromiso, cámbielo también en su nota
+   (`Compromisos/<año>/M12-C3.md`: en `responsables` y en la línea «Responsable»).
+3. Guarde con git. En el mensaje diga qué y por qué, citando el minuto:
+   `M12-C3: responsable es don Carlos («yo lo hago», 07:01)`.
+4. Corra `memo vault update`: regenera la breve con la corrección.
+5. **No use `memo publish --force` después de corregir a mano**: vuelve a generar la minuta y
+   borra las correcciones. Solo sirve si se quiere rehacer la minuta desde cero.
+
+### 3. Corregir un nombre en todas las minutas a la vez
+1. En `Propietarios.md` (o `Externos.md`): en «Nombre» va el nombre correcto; en «También
+   dicen», todas las formas en que aparece en las minutas, separadas por `;`
+   (`doña Rosa; Rosita; Rosa`).
+2. Guarde con git.
+3. Corra `memo vault update`. Muestra cada cambio (`Rosita → Rosa Pérez ×3`), lo aplica en
+   todas las minutas, breves y compromisos, y hace commit y push. Las citas «…» y las
+   transcripciones no se tocan.
+4. Si avisa «skipped … uncommitted changes», guarde ese archivo con git y córralo otra vez.
+
+### 4. Dar seguimiento a un compromiso
+1. Abra `Compromisos/<año>/M12-C3.md`.
+2. Bajo «Seguimiento», agregue una línea por novedad: `- 2026-10-15 · M14 · Ya pidió los permisos`.
+3. Al cerrarlo: `estado: cumplido` (o `cancelado`) y `cerrado: 2026-10-20`.
+4. Guarde con git.
+
+### 5. Cambiar cómo se llama al grupo
+1. En `Configuracion.md`, cambie `destinatarios` (por ejemplo `Vecinos del barrio`).
+2. Guarde con git y corra `memo vault update`.
+
+### Reglas de oro
+- Guarde con git **antes** de `memo vault update`: los archivos sin guardar se saltan.
+- Nunca edite `MinutaBreve.md` ni `Transcripcion.md`, ni cambie las citas «…».
+- No renombre carpetas ni reutilice números: el código M12-C3 es para siempre.
 
 ## Buscar en Obsidian
 - `"M12-C3"`: un punto exacto, en la minuta y en su nota de compromiso.
@@ -391,9 +444,9 @@ QUOTE_RE = re.compile(r"«[^»]*»")
 
 def apply_names(text: str, names: dict[str, str]) -> tuple[str, dict[tuple[str, str], int]]:
     """Replace every listed variant with its correct name: whole words, case-insensitive,
-    longest first (so "Mauro" never touches "don Mauro Arias"). Quotes «…» are left as said.
-    Repeats until nothing changes: "don Hansen" -> "don Hanzel" can itself be a variant of
-    "Hanzel", and one run must leave the final result (running it again changes nothing).
+    longest first (so "Tomás" never touches "don Tomás Rojas"). Quotes «…» are left as said.
+    Repeats until nothing changes: "don Ernest" -> "don Ernesto" can itself be a variant of
+    "Ernesto", and one run must leave the final result (running it again changes nothing).
     Returns the new text and how many times each (found, correct) pair was replaced."""
     changes: dict[tuple[str, str], int] = {}
     for _ in range(10):  # correct names map to themselves, so this settles in a few passes

@@ -57,7 +57,7 @@ def make_memo(tmp_path, name="memo", sha="f00", memo_date="2026-09-27", **change
 
 @pytest.mark.parametrize("text, expected", [
     ("doña Rosa", "DonaRosa"), ("el ingeniero del ICE", "ElIngenieroDelICE"),
-    ("Transcripción", "Transcripcion"), ("Don Mauro Arias (presidente)", "DonMauroAriasPresidente"),
+    ("Transcripción", "Transcripcion"), ("Don Tomás Rojas (presidente)", "DonTomasRojasPresidente"),
     ("  ", ""), ("Ñandú 2", "Nandu2"),
 ])
 def test_file_name(text, expected):
@@ -327,7 +327,7 @@ OWNERS = """# Propietarios
 
 OUTSIDERS = """| Rol | Nombre | También dicen |
 |---|---|---|
-| ingeniero | don Hansel | don Hansen |
+| ingeniero | don Ernesto | don Ernest |
 | institución | el ICE | Elise; élice |
 
 Texto después de la tabla | con barra.
@@ -356,7 +356,7 @@ def test_name_map(tmp_path):
     write_names(tmp_path)
     names = vault.name_map(tmp_path)
     assert names["rosita"] == names["doña rosa"] == names["doña rosa pérez"] == "Doña Rosa Pérez"
-    assert names["don hansen"] == "don Hansel" and names["elise"] == "el ICE"
+    assert names["don ernest"] == "don Ernesto" and names["elise"] == "el ICE"
     assert "sin nombre" not in names  # a row without a name is ignored
     (tmp_path / "nothing").mkdir()
     assert vault.name_map(tmp_path / "nothing") == {}
@@ -369,15 +369,15 @@ def test_a_variant_for_two_names_is_an_error(tmp_path):
 
 
 def test_apply_names_never_touches_quotes():
-    names = {"don hansen": "don Hansel", "hansen": "don Hansel", "don hansel": "don Hansel",
-             "mauro": "don Mauro Arias", "don mauro arias": "don Mauro Arias"}
-    text = ("Responsable: don Hansen · Hansen y don Mauro Arias — [07:01] «le pregunté a don "
-            "Hansen y a Mauro» · Mauro dijo. DonMauroArias.md")
+    names = {"don ernest": "don Ernesto", "ernest": "don Ernesto", "don ernesto": "don Ernesto",
+             "tomás": "don Tomás Rojas", "don tomás rojas": "don Tomás Rojas"}
+    text = ("Responsable: don Ernest · Ernest y don Tomás Rojas — [07:01] «le pregunté a don "
+            "Ernest y a Tomás» · Tomás dijo. DonTomasRojas.md")
     new, changes = vault.apply_names(text, names)
-    assert new == ("Responsable: don Hansel · don Hansel y don Mauro Arias — [07:01] «le pregunté "
-                   "a don Hansen y a Mauro» · don Mauro Arias dijo. DonMauroArias.md")
-    assert changes == {("don Hansen", "don Hansel"): 1, ("Hansen", "don Hansel"): 1,
-                       ("Mauro", "don Mauro Arias"): 1}
+    assert new == ("Responsable: don Ernesto · don Ernesto y don Tomás Rojas — [07:01] «le pregunté "
+                   "a don Ernest y a Tomás» · don Tomás Rojas dijo. DonTomasRojas.md")
+    assert changes == {("don Ernest", "don Ernesto"): 1, ("Ernest", "don Ernesto"): 1,
+                       ("Tomás", "don Tomás Rojas"): 1}
     assert vault.apply_names("sin cambios", {}) == ("sin cambios", {})
 
 
@@ -489,10 +489,10 @@ def test_update_message_lists_each_rename_once(tmp_path, monkeypatch, repo):
 
 
 def test_apply_names_settles_in_one_run():
-    names = {"hanzel": "Hanzel", "don hanzel": "Hanzel", "hansen": "Hanzel"}
-    once, changes = vault.apply_names("Habló don Hansen.", names)
-    assert once == "Habló Hanzel."  # not "don Hanzel", which is itself a variant
-    assert changes == {("Hansen", "Hanzel"): 1, ("don Hanzel", "Hanzel"): 1}
+    names = {"ernesto": "Ernesto", "don ernesto": "Ernesto", "ernest": "Ernesto"}
+    once, changes = vault.apply_names("Habló don Ernest.", names)
+    assert once == "Habló Ernesto."  # not "don Ernesto", which is itself a variant
+    assert changes == {("Ernest", "Ernesto"): 1, ("don Ernesto", "Ernesto"): 1}
     assert vault.apply_names(once, names) == (once, {})
 
 

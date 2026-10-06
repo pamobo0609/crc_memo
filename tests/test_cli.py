@@ -368,12 +368,12 @@ def test_vault_init_refuses_the_project_folder():
 def test_vault_update(vault_dir, monkeypatch):
     def fake(path, push):
         assert push is False
-        return vault.UpdateResult(changed=[path / "a.md"], names={("Hansen", "don Hansel"): 2},
+        return vault.UpdateResult(changed=[path / "a.md"], names={("Ernest", "don Ernesto"): 2},
                                   skipped=[path / "M1-C8.md"], committed=True)
     monkeypatch.setattr(vault, "update", fake)
     result = runner.invoke(app, ["vault", "update", "--no-push"])
     assert result.exit_code == 0, result.output
-    assert "Hansen → don Hansel ×2" in result.output and "Updated 1 files" in result.output
+    assert "Ernest → don Ernesto ×2" in result.output and "Updated 1 files" in result.output
     assert "committed (not pushed)" in result.output
     assert "skipped M1-C8.md: it has uncommitted changes" in " ".join(result.output.split())
 
