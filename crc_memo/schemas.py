@@ -11,7 +11,7 @@ Field order is deliberate: `timestamp` and `quote` come first, so the model writ
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Length limits become `maxLength` in the JSON schema, which Ollama's constrained decoding
 # enforces. Output length is what makes local extraction slow (~12 tokens/s), and long
@@ -144,21 +144,44 @@ class Topic(BaseModel):
     end: str
 
 
-class Entry(BaseModel):  # an agreement, a pending point or an observation
+class Evidence(BaseModel):
+    """Where and how a point was said: the claim can always be checked against the audio."""
+    timestamp: str
+    quote: str  # literal words, as the model copied them from the transcript
+    verified: bool = False  # the quote was found in the transcript near that time (in code)
+
+
+class WithEvidence(BaseModel):
+    evidence: list[Evidence]  # one per distinct time it was mentioned, in time order
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_timestamps(cls, data):
+        """minutes.json from before Phase 4 has only `timestamps`: keep them, without quotes
+        (`memo reprocess ID --from merge` brings the quotes back from extractions.json)."""
+        if isinstance(data, dict) and "evidence" not in data and "timestamps" in data:
+            data = dict(data)
+            data["evidence"] = [{"timestamp": ts, "quote": ""} for ts in data.pop("timestamps")]
+        return data
+
+    @property
+    def timestamps(self) -> list[str]:
+        return [e.timestamp for e in self.evidence]
+
+
+class Entry(WithEvidence):  # an agreement, a pending point or an observation
     id: str  # A1 / P1 / O1
     topic: str | None  # topic id
     text: str
-    timestamps: list[str]  # every time it was mentioned
 
 
-class MinutesCommitment(BaseModel):
+class MinutesCommitment(WithEvidence):
     id: str  # C1
     topic: str | None
     what: str
     owner: Owner
     who: str | None  # only for owner == "person"
     due: str | None
-    timestamps: list[str]
 
 
 class MinutesNextMeeting(BaseModel):
@@ -167,7 +190,19 @@ class MinutesNextMeeting(BaseModel):
     place: str | None
 
 
+class Provenance(BaseModel):
+    """What produced these minutes, so any line can be traced to its audio, models and code."""
+    memo_id: str | None
+    audio_sha256: str | None
+    audio_name: str | None
+    whisper: str | None  # model that transcribed it
+    llm: str
+    prompts: str  # short hash of crc_memo/prompts/*.md
+    code: str | None  # crc_memo git commit ("+dirty" with uncommitted changes); None outside git
+
+
 class Minutes(BaseModel):
+    provenance: Provenance | None = None  # None in minutes.json written before Phase 4
     source: Source
     meeting: Meeting
     attendees: list[str]

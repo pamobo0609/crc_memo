@@ -107,10 +107,12 @@ uv run memo process              # no path → opens the macOS file picker
 
 | Command | Does | |
 |---|---|---|
-| `memo process [PATH] [--lang es] [--sender NAME] [--date YYYY-MM-DD]` | Ingest, transcribe and write the minuta (breve + completa). No path → file picker. Resumes where it stopped. The date is read from WhatsApp file names. | ✅ |
+| `memo process [PATH] [--lang es] [--sender NAME] [--date YYYY-MM-DD]` | Ingest, transcribe and write the minuta (`Minuta.md`). No path → file picker. Resumes where it stopped. The date is read from WhatsApp file names. | ✅ |
 | `memo list` | Processed memos: date, title, duration, open action items | planned |
 | `memo show ID [--exec\|--full\|--transcript]` | Print a memo's summary, report or transcript | planned |
 | `memo reprocess ID [--from extract\|merge\|write\|render]` | Re-run summarization (after changing a prompt or model). Previous outputs are kept in the memo's `history/`. `--sender`/`--date` alone only re-render. | ✅ |
+| `memo vault init PATH` | Create an empty vault (Spanish README, templates, git repo) — see below | ✅ |
+| `memo publish ID [--no-push] [--force]` | Number the minuta (M12), write it + transcript + one note per commitment into your vault, commit and push | ✅ |
 
 ## Where your data lives
 
@@ -124,9 +126,37 @@ data/                        ← gitignored, never synced by this tool
     └── meta.json            ← original filename, language, transcription speed + loop warnings
 ```
 
-Finished minutas go to an Obsidian vault you choose (Phase 4). If you want them on your phone,
-put the vault in iCloud Drive and open it with the free Obsidian app — `crc_memo` itself never
-uploads anything.
+## Your vault (bring your own)
+
+Published minutas go to **your own vault**: a folder of plain Spanish markdown that is also a
+git repo. Open it with [Obsidian](https://obsidian.md) (free) for its search — properties like
+`[estado:abierto]`, tags, aliases — and it still reads well on GitHub. `memo vault init` sets
+Obsidian to markdown links with relative paths, so links work in both. **This repo never contains a vault or any minuta**: it's public,
+so `crc_memo` refuses a vault inside its own folder. Where your vault lives and who can see it
+is up to you — a **private** GitHub repo (free) is what this project was built around.
+
+```sh
+uv run memo vault init ~/Documents/MinutasVault      # folders, README, templates, git init
+# create a PRIVATE repo on GitHub, then:
+git -C ~/Documents/MinutasVault remote add origin <url>
+export CRC_MEMO_VAULT=~/Documents/MinutasVault       # e.g. in ~/.zshrc
+uv run memo publish <memo id>                        # writes, commits and pushes
+```
+
+```
+MinutasVault/
+├── Contactos.md                    ← owners per lote (couples too), phone, email — you fill it
+├── Minutas/2026/M12-2026-09-27/
+│   ├── Minuta.md                   ← every item: code (M12-C3) + [mm:ss] «exact quote»
+│   └── Transcripcion.md            ← the evidence every [mm:ss] points to
+├── Compromisos/2026/M12-C3.md      ← one note per commitment: estado + seguimiento
+└── Personas/RosaPerez.md           ← one note per person; `aliases:` = how the audios call her
+```
+
+The audio never goes to the vault (only its SHA-256, so anyone can check which recording a
+minuta came from). Correct a minuta by editing its `Minuta.md`; git history shows who changed
+what. Republishing keeps the number and refuses to overwrite a hand-edited minuta without
+`--force`.
 
 ## Costa Rican Spanish
 

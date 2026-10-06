@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from crc_memo import config, ingest, output, summarize, transcribe
+from crc_memo import config, ingest, output, summarize, transcribe, vault
 from crc_memo.schemas import Prose
 
 app = typer.Typer(
@@ -39,7 +39,7 @@ STEP_FILES = {
     Step.extract: [summarize.EXTRACTIONS_NAME],
     Step.merge: [summarize.MINUTES_NAME],
     Step.write: [summarize.PROSE_NAME],
-    Step.render: [output.BREVE_NAME, output.COMPLETA_NAME],
+    Step.render: [output.MINUTA_NAME],
 }
 HISTORY_DIR = "history"
 
@@ -265,6 +265,63 @@ def _write_step(folder: Path) -> None:
     if prose.meeting_recap is False:
         console.print("[yellow]⚠ This audio doesn't seem to retell a meeting: no meeting "
                       "details in the minuta. Review it before sharing.[/yellow]")
+
+
+@app.command()
+def publish(
+    memo_id: str = typer.Argument(..., metavar="ID", help="Memo ID (or a unique start of it)."),
+    force: bool = typer.Option(False, "--force", help="Replace a minuta edited in the vault."),
+    push: bool = typer.Option(True, "--push/--no-push", help="Push the vault after committing."),
+) -> None:
+    """Publish a memo's minuta to the vault ($CRC_MEMO_VAULT): number it (M12), write the
+    minuta, transcript and commitment notes, commit, and push."""
+    try:
+        folder = ingest.find_memo(config.MEMOS_DIR, memo_id)
+        if not summarize.is_written(folder):
+            raise ingest.IngestError(f"{folder.name} has no minuta yet. Run: memo process")
+        result = vault.publish(folder, vault.vault_dir(), force=force, push=push)
+    except (ingest.IngestError, vault.VaultError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    console.print(f"[green]Published[/green] [bold]M{result.number}[/bold] → {result.minuta}")
+    if result.created:
+        console.print(f"  {len(result.created)} new commitment notes in "
+                      f"{vault.COMPROMISOS_DIR}/")
+    if result.warning:
+        console.print(f"[yellow]⚠ {result.warning}[/yellow]")
+    elif result.pushed:
+        console.print("  committed and pushed")
+    elif result.committed:
+        console.print("  committed (not pushed)")
+    else:
+        console.print("  nothing changed")
+
+
+vault_app = typer.Typer(help="The vault: a private git repo of minutas (Spanish markdown).",
+                        no_args_is_help=True)
+app.add_typer(vault_app, name="vault")
+
+
+@vault_app.command("init")
+def vault_init(path: Path = typer.Argument(..., help="Folder for the new vault, e.g. "
+                                                       "~/Documents/MinutasVault")) -> None:
+    """Create an empty vault: folders, README, templates and a git repo."""
+    path = path.expanduser()
+    try:
+        created = vault.init(path)
+    except vault.VaultError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    for file in created:
+        console.print(f"[green]Created[/green] {file}")
+    console.print(
+        "\nNext:\n"
+        "  1. Create a [bold]private[/bold] repo on GitHub (no README), then:\n"
+        f"     git -C {path} remote add origin <url> && git -C {path} add -A && "
+        f"git -C {path} commit -m Inicio && git -C {path} push -u origin HEAD\n"
+        f"  2. export {vault.VAULT_ENV}={path}   [dim](e.g. in ~/.zshrc)[/dim]\n"
+        "  3. uv run memo publish <memo id>"
+    )
 
 
 @app.command("list")

@@ -23,13 +23,17 @@ before it goes to the group. The minuta completa (with [mm:ss] to check against 
 is the reference. So "good enough" means: saves the reviewer most of the work, and its
 mistakes are easy to spot and verify — not perfect.
 
-Outputs go to an **Obsidian vault** (markdown with properties, `[[links]]` and task checkboxes,
-so Obsidian provides search and cross-meeting tracking) plus a **PDF** to share with the group.
+Outputs go to a **vault**: a private GitHub repo (free tier) of plain markdown, laid out so it
+reads well on GitHub and in Obsidian (no Obsidian app needed). It's built for traceability:
+human IDs (`M12`, `M12-C3`), quotes + [mm:ss] on every item, provenance, git history of every
+correction. Plus a **PDF** to share with the group. Layout and rules: `docs/ROADMAP.md` Phase 4.
 
 ## Hard constraints
 - **$0 to run.** No paid APIs, no API keys, no cloud services. Everything local and open source.
-- **Local-only data.** Audio, transcripts, and outputs never leave the machine
-  (except the Obsidian vault, if I choose to sync it, e.g. via iCloud Drive — never by this tool).
+- **Local-only data, except the vault.** Audio and working files (`data/`) never leave the
+  machine. Published minutas + transcripts go to my **private** GitHub vault repo:
+  `memo publish` commits and pushes there (`--no-push` to keep it local). Nothing else is ever
+  sent anywhere, and the audio is never published (only its SHA-256).
 - **CLI only.** No GUI, no web server. The only "UI" is the native macOS file picker via `osascript`.
 - **Target machine:** macOS. Assume Apple Silicon unless told otherwise (affects Whisper choice).
 
@@ -85,8 +89,8 @@ crc_memo/
 └── tests/
 ```
 
-Data lives in `data/` inside the project (`memos/<id>/`; gitignored). Outputs go to a configurable
-Obsidian vault folder (Phase 4).
+Data lives in `data/` inside the project (`memos/<id>/`; gitignored). Published output goes to
+the vault, a local clone of the private repo at `$CRC_MEMO_VAULT` (Phase 4).
 
 ## Pipeline
 ```
@@ -131,7 +135,7 @@ before starting it.**
   — 27:42 Spanish memo in 1:10 (≈24× real time), 0 loops, usable accuracy
 - [ ] Phase 3 — Summarization: meeting minutes (chunk → extract → merge → full → exec, `reprocess`)
 - [ ] Phase 3.5 — Glossary checkpoint (judge dcaa.json by its effect on summaries)
-- [ ] Phase 4 — Output: Obsidian vault (properties, [[links]], tasks) + PDF via Typst for the group
+- [ ] Phase 4 — Output: traceable vault (private GitHub repo: Minuta.md, IDs M12-C3, evidence, `memo publish`) + PDF — 4a, 4b done
 - [ ] Phase 5 — History & search: under review — Obsidian covers search/tracking; likely just `memo list`/`show`
 
 ## Context rules

@@ -64,7 +64,14 @@ output short — output length is what makes local extraction slow.
 nullable objects).
 
 ## The contract: minutes.json (3b output, 3c input)
-Every key maps to something the minuta renders; nothing else travels (quotes stop at 3b).
+Every key maps to something the minuta renders, plus traceability (Phase 4a):
+- `provenance`: memo_id, audio_sha256, audio_name, whisper, llm, prompts (hash of the
+  prompt files), code (crc_memo commit, "+dirty" if uncommitted). Optional: older files lack it.
+- Items carry `evidence: [{timestamp, quote, verified}]`, one per distinct mention time
+  (`timestamps` is a derived property). `verified` is set **in code** (`verify_quote`):
+  normalized words found within ±30 s, else difflib ≥ 0.85. On the 27-min memo 34/35 quotes
+  were exact, 1 fuzzy (two fragments stitched). Compare against the packed lines, not
+  transcript.txt: its [mm:ss] markers break substrings.
 `source` (sender, memo_date, duration, language) · `meeting` (group, when, place, chaired_by)
 · `attendees` · `topics` (id T1…, title, start, end — a topic ends where the next starts) ·
 `agreements` / `pending` / `observations` (id A1/P1/O1, topic, text, timestamps) ·

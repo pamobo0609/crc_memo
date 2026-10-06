@@ -1,24 +1,29 @@
-"""Render the minuta (breve + completa) as markdown from minutes.json + prose.json.
+"""Render the minuta as one markdown file, Minuta.md, from minutes.json + prose.json.
 
 Only the prose (title, resumen, desarrollo) comes from the LLM. Everything else is rendered
 here: labels and dates come from the es/en table below, so the wording is the same in every
 minuta. Sections with nothing in them are left out. Layout: `.claude/rules/output-format.md`.
-Phase 4 adds the Obsidian touches (properties, [[links]], task checkboxes) and the PDF.
+
+Minuta.md is built for traceability: YAML frontmatter with provenance, a visible ID on every
+item (C1 locally, M12-C1 once published to the vault) and the evidence for each one:
+[mm:ss] «the words as said», with ⚠ when code couldn't find the quote in the transcript.
+Rendering is deterministic: the same inputs give byte-identical output.
 """
 
 import re
 from datetime import date
 from pathlib import Path
 
-from crc_memo.schemas import Minutes, MinutesCommitment, Prose
+import yaml
+
+from crc_memo.schemas import Evidence, Minutes, MinutesCommitment, Prose
 from crc_memo.summarize import MINUTES_NAME, PROSE_NAME, timestamp_seconds
 
-BREVE_NAME = "minuta_breve.md"
-COMPLETA_NAME = "minuta_completa.md"
+MINUTA_NAME = "Minuta.md"
 
 LABELS = {
     "es": {
-        "minuta": "Minuta", "minuta_completa": "Minuta completa", "untitled": "Reunión",
+        "minuta": "Minuta", "untitled": "Reunión", "due_label": "plazo",
         "meeting": "Reunión", "per_audio": "según el audio del {date}", "place": "Lugar",
         "chaired_by": "Presidió", "told_by": "Relato de", "audio": "audio de {duration}",
         "audio_dated": "audio de {duration} del {date}",
@@ -38,7 +43,7 @@ LABELS = {
         "months": "ene feb mar abr may jun jul ago sep oct nov dic".split(),
     },
     "en": {
-        "minuta": "Minutes", "minuta_completa": "Full minutes", "untitled": "Meeting",
+        "minuta": "Minutes", "untitled": "Meeting", "due_label": "due",
         "meeting": "Meeting", "per_audio": "per the audio of {date}", "place": "Place",
         "chaired_by": "Chaired by", "told_by": "Told by", "audio": "{duration} audio",
         "audio_dated": "{duration} audio of {date}",
@@ -83,26 +88,40 @@ def format_duration(duration: str) -> str:
     return f"{hours} h {minutes:02} min" if hours else f"{minutes} min"
 
 
-def _cell(text: str) -> str:
-    """Safe inside a markdown table cell."""
-    return text.replace("|", "\\|")
-
-
 def _bold_money(text: str) -> str:
     return COLONES_RE.sub(r"**\g<0>**", text)
 
 
-def _times(timestamps: list[str]) -> str:
-    return f"[{', '.join(timestamps)}]"
+def item_id(local_id: str, number: int | None) -> str:
+    """"C3" locally; "M12-C3" once the minuta is published as number 12."""
+    return f"M{number}-{local_id}" if number else local_id
 
 
-def _owner(c: MinutesCommitment, m: Minutes, labels: dict, bold: bool = True) -> str:
+def commitment_link(cid: str, memo_date: str) -> str:
+    """Relative link from Minutas/<YYYY>/<folder>/Minuta.md to Compromisos/<YYYY>/<cid>.md."""
+    return f"../../../Compromisos/{memo_date[:4]}/{cid}.md"
+
+
+def evidence_text(e: Evidence) -> str:
+    """[03:45] «the words», ⚠ when code couldn't find them; just [03:45] without a quote
+    (minutes merged before quotes were kept)."""
+    if not e.quote:
+        return f"[{e.timestamp}]"
+    return f"[{e.timestamp}] " + ("" if e.verified else "⚠ ") + f"«{e.quote}»"
+
+
+def _evidence(evidence: list[Evidence]) -> str:
+    return " · ".join(map(evidence_text, evidence))
+
+
+def owner_name(c: MinutesCommitment, m: Minutes, labels: dict) -> str:
+    """Who has to do it, as a plain name or role label."""
     if c.owner == "person" and c.who:
         return c.who
     if c.owner == "speaker":  # the speaker's own promise: by name once we know the sender
         return m.source.sender or labels["speaker"]
     if c.owner == "recipients":
-        return f"**{labels['recipients']}**" if bold else labels["recipients"]
+        return labels["recipients"]
     return labels["unassigned"]
 
 
@@ -111,9 +130,9 @@ def _section(title: str, lines: list[str]) -> str | None:
     return f"## {title}\n" + "\n".join(lines) if lines else None
 
 
-def _header(m: Minutes, labels: dict, full: bool, recap: bool) -> str | None:
-    """Meeting details, then who sent the audio. Not a meeting recap: no meeting details or
-    attendees (the model invents them), and the audio's date goes on the second line."""
+def _header(m: Minutes, labels: dict, recap: bool) -> str | None:
+    """Meeting details, then who sent the audio, then attendees. Not a meeting recap: no
+    meeting details or attendees (the model invents them); the audio's date goes on line 2."""
     duration = format_duration(m.source.duration)
     date_ = m.source.memo_date and format_date(m.source.memo_date, labels)
     meeting = ""
@@ -129,7 +148,7 @@ def _header(m: Minutes, labels: dict, full: bool, recap: bool) -> str | None:
                  else labels["audio"].format(duration=duration))
     told_by = m.source.sender and f"**{labels['told_by']}:** {m.source.sender}"
     lines = [meeting, " · ".join(v for v in [told_by, audio] if v)]
-    if full and recap and m.attendees:
+    if recap and m.attendees:
         lines.append(f"**{labels['attendees']}:** {', '.join(m.attendees)}")
     return "\n".join(line for line in lines if line)
 
@@ -141,16 +160,14 @@ def _recipients(m: Minutes, labels: dict) -> str | None:
     return f"> **{labels['recipients_ask']}:**\n" + "\n".join(asks) if asks else None
 
 
-def _commitments(m: Minutes, labels: dict, full: bool) -> str | None:
-    if not m.commitments:
-        return None
-    columns = [labels["who"], labels["what"], labels["due"]] + ([labels["source"]] if full else [])
-    rows = [f"| {' | '.join(columns)} |", "|" + "---|" * len(columns)]
-    for c in m.commitments:
-        cells = [_owner(c, m, labels), c.what, c.due or labels["no_due"]]
-        cells += [_times(c.timestamps)] if full else []
-        rows.append(f"| {' | '.join(_cell(x) for x in cells)} |")
-    return f"## {labels['commitments']}\n" + "\n".join(rows)
+def _commitment_line(c: MinutesCommitment, m: Minutes, labels: dict, number: int | None) -> str:
+    cid = item_id(c.id, number)
+    ref = f"[{cid}]({commitment_link(cid, m.source.memo_date)})" \
+        if number and m.source.memo_date else cid
+    owner = owner_name(c, m, labels)
+    owner = f"**{owner}**" if c.owner == "recipients" else owner
+    due = f"{labels['due_label']}: {c.due or labels['no_due']}"
+    return f"- **{ref}** · {owner} · {c.what} · {due} — {_evidence(c.evidence)}"
 
 
 def _next_meeting(m: Minutes, labels: dict) -> str | None:
@@ -160,66 +177,102 @@ def _next_meeting(m: Minutes, labels: dict) -> str | None:
     return _section(labels["next_meeting"], [text[:1].upper() + text[1:]] if text else [])
 
 
-def _topics(m: Minutes, prose: Prose, labels: dict) -> str | None:
-    """Each topic: its desarrollo, then which acuerdos (by number) and compromisos it holds."""
+def _topics(m: Minutes, prose: Prose, labels: dict, number: int | None) -> str | None:
+    """Each topic: its desarrollo, then the IDs of the acuerdos and compromisos it holds."""
     blocks = []
     for n, topic in enumerate(m.topics, 1):
-        agreements = [str(i) for i, a in enumerate(m.agreements, 1) if a.topic == topic.id]
-        owners = list(dict.fromkeys(_owner(c, m, labels, bold=False)
-                                    for c in m.commitments if c.topic == topic.id))
-        refs = " · ".join(f"{label}: {', '.join(values)}" for label, values in
-                          [(labels["agreements"], agreements), (labels["commitments"], owners)]
-                          if values)
+        refs = " · ".join(
+            f"{label}: {', '.join(item_id(i.id, number) for i in items)}"
+            for label, items in [(labels["agreements"], [a for a in m.agreements if a.topic == topic.id]),
+                                 (labels["commitments"], [c for c in m.commitments if c.topic == topic.id])]
+            if items)
         lines = [f"### {n}. {topic.title} [{topic.start}–{topic.end}]",
                  prose.developments.get(topic.id), refs]
         blocks.append("\n".join(line for line in lines if line))
     return f"## {labels['topics']}\n\n" + "\n\n".join(blocks) if blocks else None
 
 
-def render(m: Minutes, prose: Prose, full: bool = False) -> str:
-    """The minuta breve (`full=False`) or the minuta completa (`full=True`), as markdown."""
-    labels = labels_for(m.source.language)
-    title = prose.title or m.meeting.group or labels["untitled"]
-    times = (lambda timestamps: f" {_times(timestamps)}") if full else (lambda timestamps: "")
+def frontmatter(m: Minutes, prose: Prose, number: int | None) -> dict:
+    """Machine data for the vault (GitHub shows it as a table). Keys are fixed, in this order."""
+    p = m.provenance
+    return {
+        "numero": number,
+        "fecha": yaml_date(m.source.memo_date),
+        "titulo": prose.title,
+        "grupo": m.meeting.group,
+        "relato_de": m.source.sender,
+        "es_reunion": prose.meeting_recap,
+        "asistentes": m.attendees,
+        "duracion": m.source.duration,
+        "idioma": m.source.language,
+        "memo_id": p and p.memo_id,
+        "audio_sha256": p and p.audio_sha256,
+        "audio_nombre": p and p.audio_name,
+        "whisper": p and p.whisper,
+        "llm": p and p.llm,
+        "prompts": p and p.prompts,
+        "crc_memo": p and p.code,
+        "tags": ["minuta"],
+    }
 
+
+def yaml_date(iso: str | None) -> date | str | None:
+    """A real date for YAML (written unquoted: Obsidian reads it as a Date property, so it
+    sorts and filters); anything that isn't an ISO date stays as it is."""
+    try:
+        return date.fromisoformat(iso) if iso else iso
+    except ValueError:
+        return iso
+
+
+def dump_frontmatter(data: dict) -> str:
+    """YAML between --- lines, in the dict's key order (deterministic)."""
+    body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False,
+                          width=1000)
+    return f"---\n{body}---\n"
+
+
+def render_minuta(m: Minutes, prose: Prose, number: int | None = None,
+                  language: str | None = None) -> str:
+    """Minuta.md: frontmatter, then the minuta with an ID and evidence on every item.
+    Labels follow the memo's language unless `language` is given (the vault is in Spanish)."""
+    labels = labels_for(language or m.source.language)
+    title = prose.title or m.meeting.group or labels["untitled"]
+    prefix = f"M{number} · " if number else ""
+    ev = lambda item: f" — {_evidence(item.evidence)}"  # noqa: E731
     blocks = [
-        f"# {labels['minuta_completa' if full else 'minuta']} — {title}",
-        _header(m, labels, full, recap=prose.meeting_recap is not False),
+        f"# {prefix}{labels['minuta']} — {title}",
+        _header(m, labels, recap=prose.meeting_recap is not False),
         _recipients(m, labels),
-    ]
-    if full:
-        blocks.append(_topics(m, prose, labels))
-    else:
-        blocks.append(_section(labels["summary"], [prose.summary] if prose.summary else []))
-    blocks += [
-        _section(labels["agreements"], [f"{n}. {_bold_money(a.text)}{times(a.timestamps)}"
-                                        for n, a in enumerate(m.agreements, 1)]),
-        _commitments(m, labels, full),
-        _section(labels["pending"], [f"- {p.text}{times(p.timestamps)}" for p in m.pending]),
+        _section(labels["summary"], [prose.summary] if prose.summary else []),
+        _topics(m, prose, labels, number),
+        _section(labels["agreements"], [f"- **{item_id(a.id, number)}** {_bold_money(a.text)}{ev(a)}"
+                                        for a in m.agreements]),
+        _section(labels["commitments"], [_commitment_line(c, m, labels, number)
+                                         for c in m.commitments]),
+        _section(labels["pending"], [f"- **{item_id(p.id, number)}** {p.text}{ev(p)}"
+                                     for p in m.pending]),
         _next_meeting(m, labels),
+        _section(labels["observations"], [f"- **{item_id(o.id, number)}** {o.text}{ev(o)}"
+                                          for o in m.observations]),
+        _section(labels["tangents"], [f"- [{t.start}–{t.end}] {t.summary.rstrip('.')} — "
+                                      f"{labels['skippable']}" for t in m.tangents]),
     ]
-    if full:
-        blocks += [
-            _section(labels["observations"],
-                     [f"- {o.text}{times(o.timestamps)}" for o in m.observations]),
-            _section(labels["tangents"], [f"- [{t.start}–{t.end}] {t.summary.rstrip('.')} — {labels['skippable']}"
-                                          for t in m.tangents]),
-        ]
     footer = labels["footer_by"].format(sender=m.source.sender) if m.source.sender \
         else labels["footer"]
-    if full:
-        footer += "\n" + labels["footer_times"]
-    blocks.append(f"---\n*{footer}*")
-    return "\n\n".join(b for b in blocks if b) + "\n"
+    blocks.append(f"---\n*{footer}\n{labels['footer_times']}*")
+    body = "\n\n".join(b for b in blocks if b) + "\n"
+    return dump_frontmatter(frontmatter(m, prose, number)) + "\n" + body
+
+
+def load(folder: Path) -> tuple[Minutes, Prose]:
+    return (Minutes.model_validate_json((folder / MINUTES_NAME).read_text()),
+            Prose.model_validate_json((folder / PROSE_NAME).read_text()))
 
 
 def write(folder: Path) -> list[Path]:
-    """Render both minutas into the memo folder. Cheap and deterministic, so it always reruns."""
-    minutes = Minutes.model_validate_json((folder / MINUTES_NAME).read_text())
-    prose = Prose.model_validate_json((folder / PROSE_NAME).read_text())
-    paths = []
-    for name, full in [(BREVE_NAME, False), (COMPLETA_NAME, True)]:
-        path = folder / name
-        path.write_text(render(minutes, prose, full))
-        paths.append(path)
-    return paths
+    """Render Minuta.md (unnumbered) into the memo folder. Cheap and deterministic, so it
+    always reruns; `memo publish` renders the numbered version into the vault."""
+    path = folder / MINUTA_NAME
+    path.write_text(render_minuta(*load(folder)))
+    return [path]

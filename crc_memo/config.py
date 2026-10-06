@@ -9,9 +9,6 @@ DATA_DIR = PROJECT_DIR / "data"
 DB_PATH = DATA_DIR / "memo.db"
 MEMOS_DIR = DATA_DIR / "memos"
 
-# Where finished reports are written. Google Drive for desktop syncs this folder.
-OUTPUT_DIR = Path.home() / "Google Drive" / "Memos"
-
 # Models
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 # Short natural sentence with names/slang Whisper tends to misspell (max ~220 tokens).

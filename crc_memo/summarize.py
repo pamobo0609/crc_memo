@@ -8,8 +8,11 @@
             Rendering the minuta from minutes.json + prose.json is output.py's job.
 """
 
+import difflib
+import hashlib
 import json
 import re
+import subprocess
 import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -24,6 +27,7 @@ from crc_memo.schemas import (
     Commitment,
     Development,
     Entry,
+    Evidence,
     Meeting,
     MergePlan,
     NextMeeting,
@@ -34,6 +38,7 @@ from crc_memo.schemas import (
     OwnerCheck,
     Point,
     Prose,
+    Provenance,
     Source,
     Tangent,
     Topic,
@@ -401,10 +406,13 @@ def _repair(groups: list[list[int]], count: int) -> list[list[int]]:
     return repaired + [[i] for i in range(1, count + 1) if i not in seen]
 
 
-def _timeline(items: list) -> tuple[list, list[str]]:
-    """Items in time order, and their distinct timestamps."""
+def _timeline(items: list) -> tuple[list, list[Evidence]]:
+    """Items in time order, and the evidence: one quote per distinct time (the first one)."""
     items = sorted(items, key=lambda i: timestamp_seconds(i.timestamp))
-    return items, list(dict.fromkeys(i.timestamp for i in items))
+    first = {}
+    for item in items:
+        first.setdefault(item.timestamp, item.quote.strip())
+    return items, [Evidence(timestamp=ts, quote=quote) for ts, quote in first.items()]
 
 
 def _plain(text: str) -> str:
@@ -442,8 +450,8 @@ def _combine_topics(spans: list[TopicSpan]) -> dict:
 
 
 def _combine_entry(points: list[Point]) -> dict:
-    points, timestamps = _timeline(points)
-    return {"text": _sentence(points[0].text, period=True), "timestamps": timestamps}
+    points, evidence = _timeline(points)
+    return {"text": _sentence(points[0].text, period=True), "evidence": evidence}
 
 
 def _role(item: Commitment) -> str:
@@ -455,12 +463,12 @@ def _role(item: Commitment) -> str:
 def _combine_commitment(items: list[Commitment]) -> dict:
     """Most specific owner across mentions: a named person, else the speaker or the recipients
     (first mention that says), else nobody."""
-    items, timestamps = _timeline(items)
+    items, evidence = _timeline(items)
     who = _first((i.who for i in items), RECIPIENTS | SPEAKER)
     roles = [r for r in map(_role, items) if r in ("speaker", "recipients")]
     owner = "person" if who else (roles[0] if roles else "nobody")
     return {"what": _sentence(items[0].what), "owner": owner, "who": who,
-            "due": _first((i.due for i in items), VAGUE_DUE), "timestamps": timestamps}
+            "due": _first((i.due for i in items), VAGUE_DUE), "evidence": evidence}
 
 
 def _describe(field: str, item) -> str:
@@ -548,6 +556,65 @@ def _verify_owner(c: MinutesCommitment, lines: list[Segment], language: str,
     return c.model_copy(update={"owner": owner, "who": who})
 
 
+# A quote counts as verified when this close to the transcript near its time (0–1, difflib).
+# Whisper and the model differ in small ways (accents, "pa'" / "para"); invented quotes don't.
+QUOTE_MATCH = 0.85
+QUOTE_WINDOW_SECONDS = 30  # look this far around the quote's timestamp
+
+
+def verify_quote(quote: str, timestamp: str, lines: list[Segment]) -> bool:
+    """Is `quote` really in the transcript near `timestamp`? Checked in code, never by the
+    model: an exact match of the normalized words, else the best fuzzy match of a window of
+    the same length."""
+    words = _plain(quote).split()
+    if not words:
+        return False
+    at = timestamp_seconds(timestamp)
+    near = " ".join(_plain(l.text) for l in lines
+                    if abs(l.start - at) <= QUOTE_WINDOW_SECONDS or l.start <= at <= l.end)
+    if " ".join(words) in near:
+        return True
+    text = near.split()
+    windows = (" ".join(text[i:i + len(words)]) for i in range(max(1, len(text) - len(words) + 1)))
+    return any(difflib.SequenceMatcher(None, " ".join(words), w).ratio() >= QUOTE_MATCH
+               for w in windows)
+
+
+def _verified(item, lines: list[Segment]):
+    return item.model_copy(update={"evidence": [
+        e.model_copy(update={"verified": verify_quote(e.quote, e.timestamp, lines)})
+        for e in item.evidence]})
+
+
+def prompts_hash() -> str:
+    """Short hash of every prompt file: which prompt version produced these minutes."""
+    digest = hashlib.sha256()
+    for path in sorted(config.PROMPTS_DIR.glob("*.md")):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def code_version() -> str | None:
+    """crc_memo's git commit, "+dirty" with uncommitted changes; None outside a git checkout."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(config.PROJECT_DIR), *args], capture_output=True,
+                              text=True, check=True).stdout.strip()
+    try:
+        commit = git("rev-parse", "--short=12", "HEAD")
+        dirty = git("status", "--porcelain", "--untracked-files=no", "--", "crc_memo")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return commit + ("+dirty" if dirty else "")
+
+
+def _provenance(folder: Path) -> Provenance:
+    meta = json.loads((folder / "meta.json").read_text())
+    return Provenance(memo_id=meta.get("id"), audio_sha256=meta.get("sha256"),
+                      audio_name=meta.get("source_name"),
+                      whisper=meta.get("transcription", {}).get("model"),
+                      llm=config.LLM_MODEL, prompts=prompts_hash(), code=code_version())
+
+
 def is_merged(folder: Path) -> bool:
     return (folder / MINUTES_NAME).exists()
 
@@ -587,15 +654,15 @@ def merge(folder: Path, stats: LLMStats | None = None) -> tuple[Minutes, int]:
     entries = {}
     for field, prefix in ENTRY_FIELDS.items():
         data = sorted((e for e in map(_combine_entry, grouped[field]) if _value(e["text"])),
-                      key=lambda e: timestamp_seconds(e["timestamps"][0]))
+                      key=lambda e: timestamp_seconds(e["evidence"][0].timestamp))
         if field == "observations":  # each fact in one field, even when the model repeats it
-            data = [e for e in data if not _covered(e["timestamps"][0], tangents, meeting_times)]
-        entries[field] = [Entry(id=f"{prefix}{n}", topic=_topic_of(e["timestamps"][0], topics), **e)
+            data = [e for e in data if not _covered(e["evidence"][0].timestamp, tangents, meeting_times)]
+        entries[field] = [Entry(id=f"{prefix}{n}", topic=_topic_of(e["evidence"][0].timestamp, topics), **e)
                           for n, e in enumerate(data, 1)]
     commitment_data = sorted((c for c in map(_combine_commitment, grouped["commitments"])
                               if _value(c["what"])),
-                             key=lambda c: timestamp_seconds(c["timestamps"][0]))
-    commitments = [MinutesCommitment(id=f"C{n}", topic=_topic_of(c["timestamps"][0], topics), **c)
+                             key=lambda c: timestamp_seconds(c["evidence"][0].timestamp))
+    commitments = [MinutesCommitment(id=f"C{n}", topic=_topic_of(c["evidence"][0].timestamp, topics), **c)
                    for n, c in enumerate(commitment_data, 1)]
     if topics:  # the last topic runs at least until the last item filed under it
         last_items = [ts for e in [*commitments, *(x for v in entries.values() for x in v)]
@@ -612,7 +679,10 @@ def merge(folder: Path, stats: LLMStats | None = None) -> tuple[Minutes, int]:
     if lines:
         commitments = [_verify_owner(c, lines, language_name(source.language), stats)
                        for c in commitments]
+    commitments = [_verified(c, lines) for c in commitments]
+    entries = {field: [_verified(e, lines) for e in items] for field, items in entries.items()}
     minutes = Minutes(
+        provenance=_provenance(folder),
         source=source,
         meeting=Meeting(**{f: _first(getattr(i, f) for i in infos)
                            for f in ["group", "when", "place", "chaired_by"]}),

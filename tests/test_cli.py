@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-from crc_memo import config, ingest, summarize, transcribe
+from crc_memo import config, ingest, summarize, transcribe, vault
 from crc_memo.cli import app
 
 runner = CliRunner()
@@ -75,8 +75,7 @@ def test_process_ingests_and_transcribes(audio_files, memos_dir):
     assert "Merged" in result.output
     assert (folder / "minutes.json").exists()
     assert "Wrote the prose" in result.output
-    assert (folder / "minuta_breve.md").read_text().startswith("# Minuta — Reunión")
-    assert (folder / "minuta_completa.md").exists()
+    assert "\n# Minuta — Reunión\n" in (folder / "Minuta.md").read_text()
 
 
 def test_process_warns_about_loops(audio_files, monkeypatch):
@@ -209,7 +208,7 @@ def memo(audio_files, memos_dir, tmp_path):
 
 
 def test_date_comes_from_the_whatsapp_file_name(memo):
-    assert "según el audio del 27 sep 2026" in (memo / "minuta_breve.md").read_text()
+    assert "según el audio del 27 sep 2026" in (memo / "Minuta.md").read_text()
 
 
 def test_process_with_sender_and_date(audio_files, memos_dir):
@@ -217,7 +216,7 @@ def test_process_with_sender_and_date(audio_files, memos_dir):
                                  "--sender", "Marta", "--date", "2026-10-05"])
     assert result.exit_code == 0, result.output
     (folder,) = memos_dir.iterdir()
-    text = (folder / "minuta_breve.md").read_text()
+    text = (folder / "Minuta.md").read_text()
     assert "según el audio del 5 oct 2026" in text and "**Relato de:** Marta" in text
 
 
@@ -239,8 +238,7 @@ def test_reprocess_reruns_from_extract_and_keeps_history(memo, llm_calls):
     assert len(llm_calls) == before + 1  # the empty extraction needs no merge/write calls
     (archive,) = (memo / "history").iterdir()
     assert sorted(p.name for p in archive.iterdir()) == [
-        "extractions.json", "meta.json", "minuta_breve.md", "minuta_completa.md",
-        "minutes.json", "prose.json"]
+        "Minuta.md", "extractions.json", "meta.json", "minutes.json", "prose.json"]
 
 
 def test_reprocess_from_merge_keeps_earlier_steps(memo, llm_calls):
@@ -256,14 +254,13 @@ def test_sender_alone_only_rerenders(memo, llm_calls):
     assert result.exit_code == 0, result.output
     assert "from render" in result.output and "Prose already written" in result.output
     assert len(llm_calls) == before
-    assert "**Relato de:** Don Carlos" in (memo / "minuta_breve.md").read_text()
+    assert "**Relato de:** Don Carlos" in (memo / "Minuta.md").read_text()
     assert json.loads((memo / "minutes.json").read_text())["source"]["sender"] == "Don Carlos"
     assert json.loads((memo / "meta.json").read_text())["sender"] == "Don Carlos"
 
 
 def test_reprocess_without_outputs_archives_nothing(memo):
-    for name in ["extractions.json", "minutes.json", "prose.json", "minuta_breve.md",
-                 "minuta_completa.md"]:
+    for name in ["extractions.json", "minutes.json", "prose.json", "Minuta.md"]:
         (memo / name).unlink()
     result = runner.invoke(app, ["reprocess", memo.name])
     assert result.exit_code == 0
@@ -306,3 +303,61 @@ def test_warns_when_the_audio_is_not_a_meeting_recap(memo):
     (memo / "prose.json").write_text(json.dumps(prose))
     result = runner.invoke(app, ["reprocess", memo.name, "--from", "render"])
     assert "doesn't seem to retell a meeting" in " ".join(result.output.split())
+
+
+# --- publish ------------------------------------------------------------------------
+
+@pytest.fixture
+def vault_dir(tmp_path, monkeypatch):
+    path = tmp_path / "vault"
+    path.mkdir()
+    monkeypatch.setenv("CRC_MEMO_VAULT", str(path))
+    return path
+
+
+def test_publish_to_a_plain_folder(memo, vault_dir):
+    result = runner.invoke(app, ["publish", memo.name[:4]])
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Published M1 →" in output and "not a git repo" in output
+    assert (vault_dir / "Minutas/2026/M1-2026-09-27/Minuta.md").exists()
+
+
+@pytest.mark.parametrize("committed, pushed, expected", [
+    (True, True, "committed and pushed"), (True, False, "committed (not pushed)"),
+    (False, False, "nothing changed"),
+])
+def test_publish_reports_git(memo, vault_dir, monkeypatch, committed, pushed, expected):
+    def fake(folder, vault_path, force, push):
+        assert (force, push) == (False, False)
+        return vault.PublishResult(3, vault_path / "M.md", [vault_path / "c.md"],
+                                   committed=committed, pushed=pushed)
+    monkeypatch.setattr(vault, "publish", fake)
+    result = runner.invoke(app, ["publish", memo.name, "--no-push"])
+    assert expected in result.output
+    assert "1 new commitment notes" in result.output
+
+
+def test_publish_errors(memo, monkeypatch, memos_dir):
+    monkeypatch.delenv("CRC_MEMO_VAULT", raising=False)
+    result = runner.invoke(app, ["publish", memo.name])
+    assert result.exit_code == 1 and "Set CRC_MEMO_VAULT" in result.output
+
+    (memo / "prose.json").unlink()
+    result = runner.invoke(app, ["publish", memo.name])
+    assert result.exit_code == 1 and "has no minuta yet" in result.output
+
+
+
+def test_vault_init(tmp_path):
+    result = runner.invoke(app, ["vault", "init", str(tmp_path / "MinutasVault")])
+    assert result.exit_code == 0, result.output
+    assert "Created" in result.output and "private" in result.output
+    assert (tmp_path / "MinutasVault" / "Contactos.md").exists()
+
+
+def test_vault_init_refuses_the_project_folder():
+    result = runner.invoke(app, ["vault", "init", str(config.PROJECT_DIR / "MinutasVault")])
+    assert result.exit_code == 1
+    assert "this repo is public" in " ".join(result.output.split())
+    assert not (config.PROJECT_DIR / "MinutasVault").exists()

@@ -3,11 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from crc_memo import summarize
+from crc_memo.schemas import (ChunkExtraction, Commitment, Evidence, MeetingInfo, Minutes,
+                              MinutesCommitment, NextMeeting, Point, Tangent, Topic, TopicSpan)
 from crc_memo.transcribe import Segment
 
-from crc_memo import summarize
-from crc_memo.schemas import (MinutesCommitment, ChunkExtraction, Commitment, MeetingInfo, NextMeeting, Point,
-                              Tangent, Topic, TopicSpan)
+
+def ev(*timestamps):
+    """Evidence for made-up items: a placeholder quote at each time."""
+    return [Evidence(timestamp=ts, quote=f"cita {ts}") for ts in timestamps]
 
 
 def point(ts, text):
@@ -136,7 +140,9 @@ def test_combine_commitment_takes_the_most_specific_values():
         commitment("02:00", "cotizar.", due="ahorita", owner="recipients"),
     ])
     assert combined == {"what": "Cotizar", "owner": "person", "who": "Doña Rosa",  # name wins
-                        "due": "el 15", "timestamps": ["02:00", "09:00"]}
+                        "due": "el 15", "evidence": [
+                            Evidence(timestamp="02:00", quote="«cotizar.»"),
+                            Evidence(timestamp="09:00", quote="«cotizar pintura»")]}
 
 
 @pytest.mark.parametrize("mentions, owner", [
@@ -351,7 +357,7 @@ def test_context_is_the_line_with_one_before_and_after():
 def test_verify_owner(llm, answer, expected):
     llm.owners = [answer]
     c = MinutesCommitment(id="C1", topic=None, what="Abrir las calles", owner="recipients",
-                          who=None, due=None, timestamps=["00:47"])
+                          who=None, due=None, evidence=ev("00:47"))
     stats = summarize.LLMStats()
     checked = summarize._verify_owner(c, LINES, "Spanish", stats)
     assert (checked.owner, checked.who) == expected
@@ -365,3 +371,95 @@ def test_no_owner_checks_without_a_transcript(llm, tmp_path):
                         segments_end=None)
     (c,) = summarize.merge(folder)[0].commitments
     assert (c.owner, c.who, llm.checks) == ("person", "Rosa", [])
+
+
+# --- evidence and provenance (4a) ---------------------------------------------------
+
+TRANSCRIPT = [Segment(0, 12, "Buenos días vecinos, les cuento cómo nos fue."),
+              Segment(40, 52, "Doña Rosa va a cotizar la pintura antes del quince."),
+              Segment(52, 60, "Y el desarrollador tiene que abrir las calles."),
+              Segment(200, 210, "Eso fue todo, pura vida.")]
+
+
+@pytest.mark.parametrize("quote, timestamp, expected", [
+    ("Doña Rosa va a cotizar la pintura", "00:40", True),           # exact
+    ("dona rosa va a cotizar la pintura", "00:41", True),           # accents/case don't matter
+    ("Rosa va cotizar la pintura antes del 15", "00:40", True),      # small differences: fuzzy
+    ("el desarrollador tiene que abrir las calles", "00:52", True),  # neighbouring line
+    ("el ICE va a poner la luz mañana", "00:40", False),            # not said
+    ("pura vida", "00:40", False),                                  # said, but much later
+    ("pura vida", "03:25", True),
+    ("", "00:40", False),
+    ("cotizar la pintura", "abc", False),                           # unparseable time
+])
+def test_verify_quote(quote, timestamp, expected):
+    assert summarize.verify_quote(quote, timestamp, TRANSCRIPT) is expected
+
+
+def test_timeline_keeps_the_first_quote_per_time():
+    items = [point("01:00", "b"), point("00:10", "a"), point("01:00", "otra")]
+    _, evidence = summarize._timeline(items)
+    assert [(e.timestamp, e.quote) for e in evidence] == [("00:10", "«a»"), ("01:00", "«b»")]
+
+
+def test_merge_verifies_evidence_and_records_provenance(llm, tmp_path, no_thresholds, monkeypatch):
+    monkeypatch.setattr(summarize, "code_version", lambda: "abc123")
+    folder = write_memo(
+        tmp_path / "memo",
+        chunk(agreements=[Point(timestamp="00:00", quote="les cuento cómo nos fue", text="Cuento"),
+                          Point(timestamp="00:05", quote="frase inventada por el modelo", text="Otro")]),
+        meta={"id": "abc", "sha256": "abcdef", "source_name": "nota.ogg", "language": "es",
+              "transcription": {"model": "whisper-x"}},
+    )
+    (folder / "segments.json").write_text(json.dumps(
+        [{"start": 0.0, "end": 12.0, "text": " Buenos días vecinos, les cuento cómo nos fue."}]))
+
+    minutes, _ = summarize.merge(folder)
+
+    assert [e.evidence[0].verified for e in minutes.agreements] == [True, False]
+    assert minutes.agreements[0].timestamps == ["00:00"]
+    p = minutes.provenance
+    assert (p.memo_id, p.audio_sha256, p.audio_name, p.whisper, p.code) == \
+        ("abc", "abcdef", "nota.ogg", "whisper-x", "abc123")
+    assert p.llm == summarize.config.LLM_MODEL and len(p.prompts) == 12
+    saved = json.loads((folder / "minutes.json").read_text())
+    assert saved["agreements"][0]["evidence"][0] == {"timestamp": "00:00",
+                                                     "quote": "les cuento cómo nos fue",
+                                                     "verified": True}
+
+
+def test_prompts_hash_changes_with_any_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr(summarize.config, "PROMPTS_DIR", tmp_path)
+    (tmp_path / "a.md").write_text("uno")
+    first = summarize.prompts_hash()
+    assert summarize.prompts_hash() == first  # deterministic
+    (tmp_path / "a.md").write_text("dos")
+    assert summarize.prompts_hash() != first
+
+
+def test_code_version_in_this_checkout():
+    version = summarize.code_version()
+    assert version is None or len(version.removesuffix("+dirty")) == 12
+
+
+@pytest.mark.parametrize("status, expected", [("", "0123456789ab"), (" M crc_memo/x.py", "0123456789ab+dirty")])
+def test_code_version_marks_uncommitted_changes(monkeypatch, status, expected):
+    answers = iter(["0123456789ab\n", status])
+    monkeypatch.setattr(summarize.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(stdout=next(answers)))
+    assert summarize.code_version() == expected
+
+
+@pytest.mark.parametrize("error", [OSError("no git"), summarize.subprocess.CalledProcessError(128, "git")])
+def test_code_version_outside_git(monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(summarize.subprocess, "run", fail)
+    assert summarize.code_version() is None
+
+
+def test_older_minutes_without_provenance_still_load(llm, tmp_path, no_thresholds):
+    minutes, _ = summarize.merge(write_memo(tmp_path / "memo", chunk()))
+    data = minutes.model_dump()
+    del data["provenance"]  # minutes.json written before Phase 4
+    assert Minutes.model_validate(data).provenance is None

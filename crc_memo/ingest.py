@@ -43,10 +43,14 @@ def date_from_name(name: str) -> str | None:
     return None
 
 
+def read_meta(folder: Path) -> dict:
+    return json.loads((folder / META_NAME).read_text())
+
+
 def update_meta(folder: Path, **values) -> dict:
     """Set keys in the memo's meta.json; returns the updated meta."""
     path = folder / META_NAME
-    meta = json.loads(path.read_text()) | values
+    meta = read_meta(folder) | values
     path.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
     return meta
 

@@ -58,31 +58,22 @@ without glossary entries.
 - The dictionary's older/rural vocabulary may suit elderly speakers better than expected.
 - **Done when:** the glossary measurably improves summaries — or we decide it isn't needed.
 
-## Phase 4 — Output: Obsidian vault + PDF
-Replaces the Google Drive folder / pandoc `--docx` plan. An Obsidian vault is just a folder of
-markdown, so there's no lock-in: the tool only writes files. Obsidian is free; its paid Sync is
-not needed (rule 1).
-- Per memo, a folder `<vault>/Minutas/<YYYY-MM-DD> <group>/` with `Minuta breve.md`,
-  `Minuta completa.md`, `Transcripción.md` and a PDF.
-- **Obsidian markdown**, rendered from `minutes.json`:
-  - **properties** (YAML frontmatter): `fecha`, `grupo`, `relato_de`, `duracion`, `asistentes`,
-    `tags: [minuta]` — filter/sort meetings;
-  - **wikilinks** for people and groups (`[[Doña Rosa]]`) — backlinks show every meeting
-    someone appears in. Names must be normalized (honorific capitalization, one form per
-    person) or links split;
-  - **task checkboxes** for commitments (`- [ ] … — [[Doña Rosa]] — antes del 15`) — one search
-    lists open commitments across all meetings.
-- **PDF for the WhatsApp group** (end users, often elderly): large readable text, no timestamps,
-  no links. **Typst** via the `typst` Python package (Apache-2.0, self-contained wheel, works
-  on Linux CI); the template `crc_memo/templates/minuta.typ` reads `minutes.json` directly, so
-  one contract feeds both markdown and PDF.
-- Labels and dates localized (es/en table), matching the memo's language.
-- **Open decisions** (recommendations in parentheses):
-  1. Vault: new vault just for minutas, or a `Minutas/` folder in an existing vault?
-  2. PDF: minuta breve only (recommended — it's what the group reads), or both?
-  3. Phone access: vault in iCloud Drive works with Obsidian mobile for free — needed?
-- **Done when:** a processed memo appears in Obsidian with working properties, backlinks and
-  tasks, and its PDF reads well on a phone.
+## Phase 4 — Output: a traceable vault (private GitHub repo) + PDF
+The vault is a private GitHub repo (free tier) of plain markdown that reads well on GitHub and
+in Obsidian (no app needed). Goal: **traceability** — human IDs, exact quotes with [mm:ss],
+provenance, and git history of every correction. Format and vault rules:
+`.claude/rules/output-format.md`.
+Decisions: transcript in the vault, audio never (only its SHA-256); `memo publish` commits and
+pushes; humans correct the markdown; ASCII PascalCase file names; sequential IDs (M12, M12-C3).
+- **4a** ✅ Evidence (quote + verified, checked in code) and provenance in `minutes.json`.
+- **4b** ✅ One `Minuta.md` (frontmatter + IDs + evidence); `vault.py`; `memo publish`
+  (numbering, transcript, one living note per commitment in `Compromisos/<YYYY>/`, git).
+- **4c** `Contactos.md` (lote, owners — couples too —, phone, email), person notes with Obsidian
+  `aliases` (how each person is called in the audios),
+  generated indexes (README, `Compromisos/README.md`, `Personas/*.md`), `memo vault [check]`.
+- **4d** PDF for the WhatsApp group via Typst, derived from `Minuta.md`.
+- **Done when:** a processed memo is published to the private repo with working links,
+  commitment notes and indexes, and its PDF reads well on a phone.
 
 ## Phase 5 — History & search (under review)
 Obsidian covers most of the original plan: full-text search, backlinks per person, open
