@@ -4,65 +4,66 @@ paths:
   - "crc_memo/summarize.py"
   - "crc_memo/prompts/**"
 ---
-# Report output format
+# Output: the minuta (breve + completa)
 
-Target shape of the generated reports: **meeting minutes** retold by an (often elderly) speaker.
-Loaded when working on report generation or writing. Headings, labels and dates come from the
-es/en table in code; the LLM writes only the prose and items. English memos get the same
-structure with English labels. Sections with nothing in them are omitted.
+Rendered from `minutes.json` (contract in `.claude/rules/llm.md`). The LLM writes only prose
+(title, resumen, desarrollo per topic); code renders everything else. Labels and dates come
+from the es/en table in code. Sections with nothing in them are omitted. It's built from a
+retelling, so it says so — never present it as an official acta.
 
-### executive-summary.md (Spanish memo)
+Decisions (with the user): desvíos and observaciones only in the completa; [mm:ss] timestamps
+only in the completa; the recipients line appears only when the speaker asks the recipients.
+
+### Minuta breve (Spanish memo)
 ```markdown
-# Reunión de la Asociación de Vecinos — 5 oct 2026
-**Duración:** 27 min · **Envía:** Doña Marta · **Procesado:** 5 oct 2026, 14:22
+# Minuta — Reunión de la Asociación de Vecinos
+**Reunión:** ayer, según el audio del 5 oct 2026 · **Lugar:** salón comunal · **Presidió:** Don Carlos
+**Relato de:** Marta · audio de 27 min
 
-## En resumen
-La cuota mensual sube a ₡5.000 desde noviembre para pintar el salón comunal. Doña Rosa
-cotiza la pintura antes del 15. Falta saber si la municipalidad da el permiso para el turno.
+> **Piden a quienes reciben el audio:** enviar la lista de asociados por WhatsApp — **el lunes**
 
-## Le piden a usted
-- [ ] Enviar la lista de asociados por WhatsApp — **el lunes** [05:42]
+## Resumen
+La cuota sube a ₡5.000 desde noviembre para pintar el salón. El turno de diciembre depende
+de un permiso municipal que aún no está confirmado.
 
 ## Acuerdos
-- La cuota mensual sube a **₡5.000** desde noviembre [03:10, repetido 12:40]
-- El turno se hace en diciembre si hay permiso [09:05]
+1. Pintar el salón comunal antes de diciembre.
+2. La cuota mensual sube a **₡5.000** desde noviembre.
 
-## Tareas
-| Quién | Qué | Cuándo |
+## Compromisos
+| Responsable | Compromiso | Plazo |
 |---|---|---|
 | Doña Rosa | Cotizar la pintura del salón | antes del 15 |
-| Jorge | Hablar con la municipalidad sobre el alumbrado | sin fecha |
+| Jorge | Hablar con la municipalidad (permiso y alumbrado) | sin fecha |
+| **Quienes reciben el audio** | Enviar la lista de asociados por WhatsApp | el lunes |
 
 ## Pendientes
-- ¿La municipalidad dará el permiso para el turno?
+- ¿Dará la municipalidad el permiso para el turno?
 
 ## Próxima reunión
-Sábado 25 a las 3 p. m., salón comunal
+Sábado 25 · 3 de la tarde · Salón comunal
 ```
 
-### full-report.md (Spanish memo)
+### Minuta completa (Spanish memo)
 ```markdown
-# Reunión de la Asociación de Vecinos — Informe completo
-5 oct 2026 · 27 min · Doña Marta
+# Minuta completa — Reunión de la Asociación de Vecinos
+(same header) · **Asistentes:** Don Carlos (presidente), Doña Rosa (tesorera), Jorge, Doña Lupe
 
-**Participantes:** Don Carlos (presidente), Doña Rosa (tesorera), Jorge
+## Temas tratados
+### 1. Pintura del salón comunal [00:29–01:25]
+Desarrollo: 2–5 sentences on what was discussed.
+Acuerdos: 1, 2 · Compromisos: Doña Rosa
 
-## 1. Cuota y pintura del salón [00:30–06:10]
-Don Carlos propuso subir la cuota para pintar el salón... Se acordó ₡5.000 desde noviembre.
-Se repitió en [12:40].
+### 2. Turno de diciembre [01:25–02:06]
+…
 
-## 2. Turno de diciembre [06:10–11:40]
-...
-
-## Tareas
-| Quién | Qué | Cuándo | Fuente |
-|---|---|---|---|
-| Usted | Enviar la lista de asociados por WhatsApp | el lunes | [05:42] |
-| Doña Rosa | Cotizar la pintura del salón | antes del 15 | [04:15] |
-
+## Acuerdos            (numbered, with [mm:ss] — every mention: [00:49, 02:13])
+## Compromisos         (table with a Fuente [mm:ss] column)
 ## Pendientes
-...
-
-## Desvíos (se pueden saltar)
-- [08:30–10:45] Historia sobre la boda de la nieta; sin acuerdos ni tareas.
+## Próxima reunión
+## Observaciones       (e.g. Don Carlos molesto por la baja asistencia [00:22])
+## Desvíos del audio   ([01:10–01:18] La boda de la nieta — se puede saltar)
+---
+*Minuta elaborada automáticamente a partir del relato de Marta; no es un acta oficial.
+Los minutos [mm:ss] indican dónde verificarlo en el audio.*
 ```

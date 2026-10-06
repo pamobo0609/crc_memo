@@ -17,8 +17,9 @@ turns it into **meeting minutes**:
   questions, the next meeting, and anything the speaker asks *you* to do.
 - **A full report** — organized by topic with timestamps, a task table, and a "tangents"
   section that tells you what was safe to skip.
-- **A searchable history** — find *"what did he say about the hosting budget?"* across every
-  memo you've ever processed.
+- **Obsidian-ready notes** — every minuta lands in an Obsidian vault with properties, links
+  to people and task checkboxes, so you can search and track meetings over time.
+- **A PDF** of the short minuta to share back with the group.
 
 > [!NOTE]
 > **Work in progress.** Ingest and transcription work today; summarization is next.
@@ -47,7 +48,7 @@ flowchart LR
     E --> F[Merge + dedupe]
     F --> G[Full report]
     G --> H[Executive summary]
-    H --> I[📁 Markdown + SQLite index]
+    H --> I[🗂️ Obsidian notes + 📄 PDF]
 ```
 
 The executive summary is written **from the full report, not the raw transcript** — each step
@@ -63,8 +64,8 @@ processing the same file twice is instant.
 | 2 | Transcription (mlx-whisper `large-v3-turbo`): a 27-min Spanish memo in ~1 min | ✅ |
 | 3 | Summarization into meeting minutes (chunk → extract → merge → reports) | ⏳ in progress |
 | 3.5 | Glossary checkpoint, judged by its effect on summaries | ⬜ |
-| 4 | Output to a Google Drive folder, optional `.docx` | ⬜ |
-| 5 | History & full-text search | ⬜ |
+| 4 | Output: Obsidian vault (properties, links, tasks) + PDF for the group | ⬜ |
+| 5 | History & search — under review: Obsidian may cover it | ⬜ |
 
 Full details and "done when" criteria: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -108,16 +109,13 @@ uv run memo process              # no path → opens the macOS file picker
 |---|---|---|
 | `memo process [PATH] [--lang es]` | Ingest and transcribe a memo (summaries come next). No path → file picker. | ✅ ingest + transcribe |
 | `memo list` | Processed memos: date, title, duration, open action items | planned |
-| `memo search "query"` | Full-text search across transcripts and reports, with timestamps | planned |
 | `memo show ID [--exec\|--full\|--transcript]` | Print a memo's summary, report or transcript | planned |
-| `memo todos` | Open action items across all memos | planned |
 | `memo reprocess ID` | Re-run summarization (after changing a prompt or model) | planned |
 
 ## Where your data lives
 
 ```
 data/                        ← gitignored, never synced by this tool
-├── memo.db                  ← history + search index (Phase 5)
 └── memos/<id>/              ← <id> = first 12 chars of the file's SHA-256
     ├── original.ogg         ← untouched copy of what you processed
     ├── audio.wav            ← 16 kHz mono, what Whisper reads
@@ -126,8 +124,8 @@ data/                        ← gitignored, never synced by this tool
     └── meta.json            ← original filename, language, transcription speed + loop warnings
 ```
 
-Finished reports go to an output folder you choose (default: a Google Drive for desktop
-folder, so they're readable on your phone). Syncing is done by Drive — `crc_memo` itself never
+Finished minutas go to an Obsidian vault you choose (Phase 4). If you want them on your phone,
+put the vault in iCloud Drive and open it with the free Obsidian app — `crc_memo` itself never
 uploads anything.
 
 ## Costa Rican Spanish
@@ -158,7 +156,7 @@ Settings live in [`crc_memo/config.py`](crc_memo/config.py):
 | `LLM_MODEL` | `qwen3:14b` | Any model you've pulled with Ollama |
 | `LLM_NUM_CTX` | `16384` | Ollama's default context is small and **silently truncates** input |
 | `WHISPER_MODEL` | `mlx-community/whisper-large-v3-turbo` | |
-| `OUTPUT_DIR` | `~/Google Drive/Memos` | Where reports are written |
+| `OUTPUT_DIR` | `~/Google Drive/Memos` | Where reports are written — becomes the Obsidian vault path in Phase 4 |
 | `DATA_DIR` | `./data` | Local history, audio and transcripts |
 
 ## Development

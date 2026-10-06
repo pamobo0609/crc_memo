@@ -5,17 +5,19 @@ import ollama
 import pytest
 
 from crc_memo import config, summarize
-from crc_memo.schemas import ActionItem, ChunkExtraction
+from crc_memo.schemas import ChunkExtraction, Commitment
 from crc_memo.transcribe import Segment
 
 EXTRACTION = ChunkExtraction(
-    topics=["Pintura del salón"],
-    participants=["Doña Rosa"],
-    decisions=[],
-    action_items=[ActionItem(timestamp="01:03", quote="Doña Rosa va a cotizar",
-                             task="Cotizar la pintura", owner="Doña Rosa", due="antes del 15")],
-    open_questions=[],
-    notable=[],
+    meeting=[],
+    topics=[],
+    attendees=["Doña Rosa"],
+    agreements=[],
+    commitments=[Commitment(timestamp="01:03", quote="Doña Rosa va a cotizar",
+                            what="Cotizar la pintura", who="Doña Rosa", for_recipients=False,
+                            due="antes del 15")],
+    pending=[],
+    observations=[],
     tangents=[],
     next_meeting=[],
 )
@@ -186,7 +188,7 @@ def test_extract_saves_one_result_per_chunk(chat_calls, tmp_path, monkeypatch):
     assert summarize.is_extracted(folder)
     saved = json.loads((folder / "extractions.json").read_text())
     assert [s["range"] for s in saved] == ["00:00–00:20", "00:10–00:30"]
-    assert saved[0]["action_items"][0]["owner"] == "Doña Rosa"
+    assert saved[0]["commitments"][0]["who"] == "Doña Rosa"
     assert not list(folder.glob("*.partial.json"))
 
     prompt = chat_calls[0]["messages"][0]["content"]

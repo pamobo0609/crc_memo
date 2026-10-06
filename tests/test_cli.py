@@ -30,8 +30,8 @@ def whisper_calls(monkeypatch):
 
 
 EMPTY_EXTRACTION = (
-    '{"topics": [], "participants": [], "decisions": [], "action_items": [], '
-    '"open_questions": [], "notable": [], "tangents": [], "next_meeting": []}'
+    '{"meeting": [], "topics": [], "attendees": [], "agreements": [], "commitments": [], '
+    '"pending": [], "observations": [], "tangents": [], "next_meeting": []}'
 )
 
 
@@ -73,7 +73,7 @@ def test_process_ingests_and_transcribes(audio_files, memos_dir):
     assert "Extracted 1 chunks" in result.output
     assert (folder / "extractions.json").exists()
     assert "Merged" in result.output
-    assert (folder / "merged.json").exists()
+    assert (folder / "minutes.json").exists()
 
 
 def test_process_warns_about_loops(audio_files, monkeypatch):

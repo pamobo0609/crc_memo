@@ -27,31 +27,44 @@ Loaded when working on summarization, schemas or prompts.
 - Model name must be configurable — I'll compare several.
 
 ## Meeting context
-Memos are elderly people retelling a meeting. The listener ("usted") is not the speaker.
-- `owner`: the person named ("Doña Rosa", "el tesorero"), **"usted"** if the speaker asks the
-  listener to do it, otherwise **"sin asignar"**. Never guess.
-- `due`: as spoken ("el viernes", "antes del 15"); **"sin fecha"** if none or vague
-  (*ahorita*). Never compute calendar dates.
-- Money slang (*dos rojos* → ₡2.000): the prompt asks, but qwen3:14b ignored it twice —
-  normalize **in code** when writing reports (3c); extraction keeps literal quotes.
+Memos are elderly people retelling a meeting, sent to a WhatsApp **group**. The recipients
+are not the speaker and may not have attended.
+- `who`: the person named; `""` if nobody is named. `for_recipients: true` when the speaker
+  asks whoever receives the audio ("usted", "ustedes", "les pido a todos").
+- `due`: as spoken ("el viernes", "antes del 15"); `""` if none. Never compute calendar dates.
+- The model often writes placeholders ("no se menciona") or vague dues (*ahorita*) despite
+  the prompt → **code** turns them into `null` (`NOT_SAID`, `VAGUE_DUE` in summarize.py).
+- Money slang (*cinco rojos* → ₡5.000, *medio palo* → ₡500.000): prompting failed twice →
+  `normalize_money()` in code, applied to every text field; quotes stay literal.
 - Write values in the memo's language; keys stay English.
 
-## Extraction schema (per chunk) — evidence first
+## Extraction schema (per chunk) — only what the minuta renders, evidence first
 Field order matters: generation is left to right, so `timestamp` + `quote` come **before** the
-claim, grounding it instead of inventing a quote afterwards.
+claim, grounding it instead of inventing a quote afterwards. Length limits (`maxLength`) keep
+output short — output length is what makes local extraction slow.
 ```json
 {
-  "topics": ["Pintura del salón comunal"],
-  "participants": ["Don Carlos (presidente)", "Doña Rosa (tesorera)"],
-  "decisions": [{"timestamp": "03:10", "quote": "quedamos en subir la cuota a cinco mil", "text": "La cuota mensual sube a ₡5.000"}],
-  "action_items": [{"timestamp": "05:42", "quote": "a usted le pidieron mandar la lista", "task": "Enviar la lista de asociados por WhatsApp", "owner": "usted", "due": "el lunes"}],
-  "open_questions": [{"timestamp": "07:15", "quote": "todavía no sabemos si la muni da el permiso", "text": "¿La municipalidad dará el permiso para el turno?"}],
-  "notable": [{"timestamp": "02:05", "quote": "estaba muy molesto", "text": "Don Carlos molesto por la poca asistencia"}],
-  "tangents": [{"range": "08:30–10:45", "summary": "Historia sobre la boda de la nieta"}],
-  "next_meeting": [{"timestamp": "11:20", "quote": "el sábado 25 a las tres en el salón", "day": "el sábado 25", "time": "a las 3 de la tarde", "place": "salón comunal"}]
+  "meeting": [{"group": "Asociación de Vecinos", "when": "ayer", "place": "", "chaired_by": "Don Carlos"}],
+  "topics": [{"start": "00:29", "end": "01:25", "title": "Pintura del salón"}],
+  "attendees": ["Don Carlos (presidente)", "Doña Rosa (tesorera)"],
+  "agreements": [{"timestamp": "00:49", "quote": "la cuota va a ser de cinco rojos", "text": "La cuota sube a cinco rojos"}],
+  "commitments": [{"timestamp": "01:59", "quote": "nos mande la lista de los asociados", "what": "Enviar la lista de asociados por WhatsApp", "who": "", "for_recipients": true, "due": "el lunes"}],
+  "pending": [{"timestamp": "01:45", "quote": "no sabemos si la muni nos da el permiso", "text": "¿Dará la municipalidad el permiso?"}],
+  "observations": [{"timestamp": "00:22", "quote": "estaba bien molesto", "text": "Don Carlos molesto por la baja asistencia"}],
+  "tangents": [{"start": "01:10", "end": "01:18", "summary": "La boda de la nieta"}],
+  "next_meeting": [{"timestamp": "02:27", "quote": "el sábado 25 a las tres", "day": "el sábado 25", "time": "a las 3 de la tarde", "place": "salón comunal"}]
 }
 ```
-`next_meeting` is a list of 0 or 1 items (simpler for constrained decoding than a nullable object).
+`meeting` and `next_meeting` are lists of 0 or 1 items (simpler for constrained decoding than
+nullable objects).
+
+## The contract: minutes.json (3b output, 3c input)
+Every key maps to something the minuta renders; nothing else travels (quotes stop at 3b).
+`source` (sender, memo_date, duration, language) · `meeting` (group, when, place, chaired_by)
+· `attendees` · `topics` (id T1…, title, start, end — a topic ends where the next starts) ·
+`agreements` / `pending` / `observations` (id A1/P1/O1, topic, text, timestamps) ·
+`commitments` (id C1, topic, what, who, for_recipients, due, timestamps) · `next_meeting`
+(day, time, place) · `tangents` (start, end, summary). Unknowns are `null`.
 
 ## Merge (3b) — the LLM groups, code merges
 - The merge prompt lists numbered items per field; the LLM returns `{fact, items}` groups only.
@@ -59,8 +72,15 @@ claim, grounding it instead of inventing a quote afterwards.
 - Code builds merged items: earliest wording/quote, **all** timestamps, most specific
   owner/due (not "sin asignar"/"sin fecha"). Merging can't change names, amounts or quotes.
 - Bad groupings are repaired, never fatal: unknown/repeated numbers dropped, missing ones alone.
-- Deterministic parts stay in code: participant/topic union, tangent ranges, next meeting =
-  last mention, `notable` items repeating a tangent or the next meeting are dropped.
+- The LLM groups topics too ("Cuotas" = "Cuota de la asociación"); code then assigns each
+  item to the topic being discussed at its first timestamp.
+- Deterministic parts stay in code: attendee union, tangent ranges, next meeting = last
+  mention, observations repeating a tangent or the next meeting are dropped.
 - One chunk → no LLM call (extraction already lists each fact once).
-- Known extraction issue at chunk boundaries (seen with 60 s chunks): invented "unresolved"
-  questions when the answer lands in the next chunk. Re-check on real 5-min chunks in 3e.
+- Parked for 3e (all seen only with artificial 60 s chunks; re-check on real 5-min chunks,
+  starting with the 27-min real memo):
+  - invented "pending" items when the answer lands in the next chunk;
+  - an agreement extracted as a commitment without owner;
+  - earliest wording can be the weakest ("el costo de los rojos" lost the amount) — consider
+    the merge's own `fact` sentence for multi-mention groups;
+  - a repeated point becoming its own small topic.

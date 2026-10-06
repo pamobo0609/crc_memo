@@ -31,10 +31,12 @@ minutes (an *acta*): executive summary + detailed report.
   (owner = person named, "usted" if the speaker asks the listener, or "sin asignar"),
   pendientes, next meeting, tangents — evidence first (timestamp + quote), in the memo's language.
   Temperature 0 + seed, `think=False`, retry once with the validation error on bad output.
-- **3b** Merge + dedupe across chunks (memos repeat themselves a lot); keep every timestamp a
-  point was mentioned at.
-- **3c** Write the full report, then the exec summary **from the full report**; the LLM returns
-  JSON and code renders the markdown (es/en labels, layout in `.claude/rules/output-format.md`).
+- **3b** Merge into `minutes.json`, the contract the minuta is rendered from: IDs, topics with
+  time spans, items linked to topics, money normalized in code, `null` for unknowns. The LLM only
+  groups duplicates; every timestamp a point was mentioned at is kept.
+- **3c** Render the minuta breve + completa from `minutes.json`: the LLM writes only prose
+  (title, resumen, desarrollo per topic) and code renders everything else (es/en labels,
+  layout in `.claude/rules/output-format.md`).
 - **3d** Wire into `memo process` (resumes where it stopped), `memo reprocess ID [--from step]`
   for prompt/model iteration, `--sender` / `--date` overrides (date also read from WhatsApp
   file names like `PTT-20261005-WA0003.opus`), clear errors when Ollama/model are missing.
@@ -52,23 +54,43 @@ without glossary entries.
 - The dictionary's older/rural vocabulary may suit elderly speakers better than expected.
 - **Done when:** the glossary measurably improves summaries — or we decide it isn't needed.
 
-## Phase 4 — Output
-- Write `executive-summary.md`, `full-report.md`, `transcript.txt` to
-  `<output>/<YYYY-MM-DD> <title>/`. Title comes from the LLM.
-- Headings, labels and dates localized (es/en table), matching the memo's language.
-- Optional `--docx` via pandoc.
-- **Done when:** files appear in the Drive folder and read well on my phone.
+## Phase 4 — Output: Obsidian vault + PDF
+Replaces the Google Drive folder / pandoc `--docx` plan. An Obsidian vault is just a folder of
+markdown, so there's no lock-in: the tool only writes files. Obsidian is free; its paid Sync is
+not needed (rule 1).
+- Per memo, a folder `<vault>/Minutas/<YYYY-MM-DD> <group>/` with `Minuta breve.md`,
+  `Minuta completa.md`, `Transcripción.md` and a PDF.
+- **Obsidian markdown**, rendered from `minutes.json`:
+  - **properties** (YAML frontmatter): `fecha`, `grupo`, `relato_de`, `duracion`, `asistentes`,
+    `tags: [minuta]` — filter/sort meetings;
+  - **wikilinks** for people and groups (`[[Doña Rosa]]`) — backlinks show every meeting
+    someone appears in. Names must be normalized (honorific capitalization, one form per
+    person) or links split;
+  - **task checkboxes** for commitments (`- [ ] … — [[Doña Rosa]] — antes del 15`) — one search
+    lists open commitments across all meetings.
+- **PDF for the WhatsApp group** (end users, often elderly): large readable text, no timestamps,
+  no links. **Typst** via the `typst` Python package (Apache-2.0, self-contained wheel, works
+  on Linux CI); the template `crc_memo/templates/minuta.typ` reads `minutes.json` directly, so
+  one contract feeds both markdown and PDF.
+- Labels and dates localized (es/en table), matching the memo's language.
+- **Open decisions** (recommendations in parentheses):
+  1. Vault: new vault just for minutas, or a `Minutas/` folder in an existing vault?
+  2. PDF: minuta breve only (recommended — it's what the group reads), or both?
+  3. Phone access: vault in iCloud Drive works with Obsidian mobile for free — needed?
+- **Done when:** a processed memo appears in Obsidian with working properties, backlinks and
+  tasks, and its PDF reads well on a phone.
 
-## Phase 5 — History & search
-- SQLite tables: `memos` (metadata), `items` (action items/decisions/questions from JSON),
-  FTS5 virtual table over transcript + reports.
-- FTS5 tokenizer `unicode61 remove_diacritics 2` so `reunion` finds `reunión`.
-  (No Spanish stemming built in: `decidir` won't match `decidimos` — semantic search covers that later.)
-- Implement `list`, `search`, `show`, `todos`.
-- **Done when:** I can find "what did he say about X" in seconds across all memos.
+## Phase 5 — History & search (under review)
+Obsidian covers most of the original plan: full-text search, backlinks per person, open
+commitments via task search. **Proposed:** drop SQLite + FTS5; keep only a simple `memo list`
+(read from `data/memos/`) and `memo show`. Revisit if Obsidian falls short.
+*(Original plan, kept for reference: SQLite `memos`/`items` tables + FTS5 with
+`unicode61 remove_diacritics 2`; `list`, `search`, `show`, `todos`.)*
+- **Done when:** decided after Phase 4 is in use.
 
 ## Later (only if I want)
-- Semantic search (local embeddings + sqlite-vec). Use a **multilingual** embedding model (e.g. `bge-m3`).
+- Semantic search (local embeddings, multilingual model e.g. `bge-m3`) — or an Obsidian plugin
+  backed by a local model, if Obsidian search falls short.
 - Cross-memo tracking ("launch date changed 3 times since August").
 - `memo compare --models a,b` — same memo through several models, side by side.
 - Watch folder for automatic processing.

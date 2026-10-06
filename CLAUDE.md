@@ -3,23 +3,26 @@
 ## What this is
 A command-line tool that takes long voice memos (often 30+ min, rambling, single speaker),
 transcribes them locally, and produces:
-1. **Executive summary** — one page: TL;DR, acuerdos, tareas (who/what/when), pendientes,
-   next meeting, and anything the speaker asks *me* to do.
-2. **Full report** — structured by topic, with timestamps, action-item table, and a
-   "tangents" section marking what was safe to skip.
+1. **Minuta breve** (executive) — resumen, acuerdos, compromisos (who/what/by when),
+   pendientes, próxima reunión, and a highlighted line when the speaker asks the recipients.
+2. **Minuta completa** (detailed) — temas tratados with development and [mm:ss] ranges,
+   asistentes, observaciones, and "desvíos" marking what was safe to skip.
+   Both are rendered from `minutes.json` (the contract; see `.claude/rules/output-format.md`).
 
 **Who the memos come from:** mostly **elderly people retelling a meeting** they attended
-(community, association, committee…) as a long WhatsApp audio. I'm the listener, not the
-speaker. So the output is **meeting minutes**: owners are the people named in the memo,
-"usted" when the speaker asks me for something. Expect slow speech, digressions, repetition
+(community, association, committee…) as a long WhatsApp audio **sent to a group**. I'm one
+of the recipients, not the speaker. So the output is a **minuta**: commitments belong to the
+people named, or are flagged `for_recipients` when the speaker asks whoever receives the
+audio ("usted", "ustedes", "les pido a todos"). Expect slow speech, digressions, repetition
 and older/rural Costa Rican vocabulary. Keep the tone respectful; never "correct" the speaker.
 
-It also keeps a **history** of every processed memo and offers **search** across them.
+Outputs go to an **Obsidian vault** (markdown with properties, `[[links]]` and task checkboxes,
+so Obsidian provides search and cross-meeting tracking) plus a **PDF** to share with the group.
 
 ## Hard constraints
 - **$0 to run.** No paid APIs, no API keys, no cloud services. Everything local and open source.
 - **Local-only data.** Audio, transcripts, and outputs never leave the machine
-  (except the output folder, which is synced by Google Drive for desktop — not by this tool).
+  (except the Obsidian vault, if I choose to sync it, e.g. via iCloud Drive — never by this tool).
 - **CLI only.** No GUI, no web server. The only "UI" is the native macOS file picker via `osascript`.
 - **Target machine:** macOS. Assume Apple Silicon unless told otherwise (affects Whisper choice).
 
@@ -47,9 +50,9 @@ Claude-specific: **commit and push only when I ask.**
 | Audio conversion | `ffmpeg` (brew) | → 16kHz mono WAV |
 | Transcription | `mlx-whisper` | `large-v3-turbo`. Use `faster-whisper` if not Apple Silicon |
 | LLM | Ollama (brew) via HTTP API or `ollama` Python package | Local models only |
-| Storage + search | SQLite + FTS5 (stdlib `sqlite3`) | Single file |
-| Optional later | `sqlite-vec` + multilingual local embedding model (e.g. `bge-m3`; Spanish memos) | Semantic search |
-| Optional export | `pandoc` (brew) | `--docx` flag |
+| Output | Obsidian vault (markdown) + PDF via `typst` (Python package) | Phase 4 |
+| Search / tracking | Obsidian (search, backlinks, task search) | SQLite + FTS5 dropped (proposed) |
+| Optional later | Multilingual local embedding model (e.g. `bge-m3`; Spanish memos) | Semantic search |
 
 ## Project layout
 ```
@@ -67,16 +70,16 @@ crc_memo/
 │   ├── transcribe.py   # whisper
 │   ├── summarize.py    # chunk → extract → merge → full → exec
 │   ├── schemas.py      # JSON schemas for structured extraction
-│   ├── output.py       # write reports to the output folder (Phase 4)
-│   ├── db.py           # sqlite + FTS5
+│   ├── output.py       # render minutes.json → Obsidian markdown + PDF (Phase 4)
+│   ├── templates/      # minuta.typ (Typst PDF template, Phase 4)
 │   ├── prompts/        # one .md file per prompt, loaded at runtime
 │   └── glossary/       # dcaa.json — Costa Rican Spanish dictionary (generated once)
 ├── scripts/            # one-off tools (import_dcaa.py)
 └── tests/
 ```
 
-Data lives in `data/` inside the project (`memo.db`, `memos/<id>/`; gitignored). Output folder is configurable,
-default: a Google Drive synced folder, e.g. `~/Google Drive/Memos/`.
+Data lives in `data/` inside the project (`memos/<id>/`; gitignored). Outputs go to a configurable
+Obsidian vault folder (Phase 4).
 
 ## Pipeline
 ```
@@ -86,7 +89,7 @@ audio file → ffmpeg (16kHz mono wav) → whisper (timestamped transcript)
   → merge + dedupe extractions
   → full report (from merged data)
   → exec summary (from full report, NOT from raw transcript)
-  → write markdown to output folder + index in SQLite
+  → render Obsidian markdown + PDF into the vault
 ```
 
 ## Language: Spanish + Costa Rican Spanish
@@ -105,9 +108,7 @@ audio file → ffmpeg (16kHz mono wav) → whisper (timestamped transcript)
 ```
 memo process [PATH]        # no PATH → native macOS file picker
 memo list                  # date, title, duration, # open action items
-memo search "query"        # FTS hits with timestamps
 memo show ID [--exec|--full|--transcript]
-memo todos                 # open action items across all memos
 memo reprocess ID          # rerun summarization (e.g. after prompt/model change)
 ```
 
@@ -122,8 +123,8 @@ before starting it.**
   — 27:42 Spanish memo in 1:10 (≈24× real time), 0 loops, usable accuracy
 - [ ] Phase 3 — Summarization: meeting minutes (chunk → extract → merge → full → exec, `reprocess`)
 - [ ] Phase 3.5 — Glossary checkpoint (judge dcaa.json by its effect on summaries)
-- [ ] Phase 4 — Output (markdown to Drive folder, localized headings, optional `--docx`)
-- [ ] Phase 5 — History & search (SQLite + FTS5: `list`, `search`, `show`, `todos`)
+- [ ] Phase 4 — Output: Obsidian vault (properties, [[links]], tasks) + PDF via Typst for the group
+- [ ] Phase 5 — History & search: under review — Obsidian covers search/tracking; likely just `memo list`/`show`
 
 ## Context rules
 Topic details load on demand from `.claude/rules/` when matching files are read or edited:

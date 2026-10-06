@@ -1,12 +1,14 @@
 """Summarize: segments.json -> meeting minutes.
 
 3a extract: split the transcript into ~5-minute chunks; the local LLM extracts each to JSON.
-3b merge:   combine the chunks and remove duplicates (the LLM only groups; code merges).
+3b merge:   combine the chunks into minutes.json, the contract the minuta is rendered from
+            (the LLM only groups duplicates; code builds everything else).
 Later steps write the reports.
 """
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -16,22 +18,45 @@ from pydantic import BaseModel, ValidationError
 
 from crc_memo import config
 from crc_memo.schemas import (
-    ActionItem,
     ChunkExtraction,
-    Merged,
-    MergedAction,
-    MergedPoint,
+    Commitment,
+    Entry,
+    Meeting,
     MergePlan,
+    Minutes,
+    MinutesCommitment,
+    MinutesNextMeeting,
     Point,
+    Source,
     Tangent,
+    Topic,
+    TopicSpan,
 )
 from crc_memo.transcribe import SEGMENTS_NAME, Segment, format_timestamp
 
 EXTRACTIONS_NAME = "extractions.json"
-MERGED_NAME = "merged.json"
-MERGE_FIELDS = ["decisions", "action_items", "open_questions", "notable"]
-VAGUE = {"sin asignar", "sin fecha", ""}  # owner/due values that a later mention can improve
-NOT_PARTICIPANTS = {"usted", "speaker", "el speaker", "la speaker", "hablante", "la hablante"}
+MINUTES_NAME = "minutes.json"
+ENTRY_FIELDS = {"agreements": "A", "pending": "P", "observations": "O"}  # field -> id prefix
+GROUPED_FIELDS = ["topics", "agreements", "commitments", "pending", "observations"]
+# Values the model writes instead of "" despite the prompt; code turns them into None.
+NOT_SAID = {"no se menciona", "no mencionado", "no se dice", "desconocido", "sin fecha",
+            "sin asignar", "ninguno", "n a", "none", "unknown"}
+# Pronouns for the audio's recipients that the model puts in `who`: they mean for_recipients.
+RECIPIENTS = {"usted", "ustedes", "todos", "todos ustedes", "el grupo", "you", "everyone"}
+VAGUE_DUE = {"ahorita", "luego", "despues", "pronto", "mas tarde", "cuando pueda", "ya"}
+NOT_ATTENDEES = {"usted", "ustedes", "speaker", "el speaker", "la speaker", "hablante",
+                 "la hablante", "la persona que habla"}
+
+# Costa Rican money slang -> colones. Applied in code: the model ignored the prompt rule.
+MONEY_UNITS = {"teja": 100, "rojo": 1_000, "tucan": 5_000, "palo": 1_000_000}
+NUMBER_WORDS = {"un": 1, "una": 1, "uno": 1, "medio": 0.5, "media": 0.5, "dos": 2, "tres": 3,
+                "cuatro": 4, "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+                "quince": 15, "veinte": 20, "treinta": 30, "cuarenta": 40, "cincuenta": 50,
+                "cien": 100}
+MONEY_RE = re.compile(
+    r"\b(?P<n>\d+|" + "|".join(NUMBER_WORDS) + r")\s+(?P<unit>tejas?|rojos?|tuc[aá]n(?:es)?|palos?)\b",
+    re.IGNORECASE,
+)
 
 # Conservative chars-per-token for the budget check (Spanish speech measured ~3.3; lower is safer).
 CHARS_PER_TOKEN = 2.5
@@ -207,6 +232,16 @@ def timestamp_seconds(timestamp: str) -> float:
     return total
 
 
+def normalize_money(text: str) -> str:
+    """'cinco rojos' -> '₡5.000', 'medio palo' -> '₡500.000' (Costa Rican format)."""
+    def colones(match: re.Match) -> str:
+        n = match["n"].lower()
+        amount = int(n) if n.isdigit() else NUMBER_WORDS[n]
+        unit = match["unit"].lower().replace("á", "a").rstrip("s").removesuffix("e")
+        return "₡" + f"{int(amount * MONEY_UNITS[unit]):,}".replace(",", ".")
+    return MONEY_RE.sub(colones, text)
+
+
 def _key(text: str) -> str:
     """Comparison key: lowercase words only, ignoring '(roles)' in parentheses."""
     return " ".join(re.findall(r"\w+", re.sub(r"\(.*?\)", "", text).lower()))
@@ -222,24 +257,15 @@ def _union(labels: list[str]) -> list[str]:
     return list(seen.values())
 
 
-def _range_bounds(range_: str) -> tuple[str, str]:
-    """'01:10–01:18' (or with '-') -> ('01:10', '01:18'); a single time is both bounds."""
-    start, _, end = range_.replace("-", "–").partition("–")
-    return start.strip(), (end or start).strip()
-
-
 def _merge_tangents(tangents: list[Tangent]) -> list[Tangent]:
     """The same digression seen by two overlapping chunks becomes one (overlapping ranges)."""
     merged: list[Tangent] = []
-    for t in sorted(tangents, key=lambda t: timestamp_seconds(_range_bounds(t.range)[0])):
-        start, end = _range_bounds(t.range)
-        if merged:
-            last_start, last_end = _range_bounds(merged[-1].range)
-            if timestamp_seconds(start) <= timestamp_seconds(last_end):
-                if timestamp_seconds(end) > timestamp_seconds(last_end):
-                    merged[-1].range = f"{last_start}–{end}"
-                continue
-        merged.append(t.model_copy())
+    for t in sorted(tangents, key=lambda t: timestamp_seconds(t.start)):
+        if merged and timestamp_seconds(t.start) <= timestamp_seconds(merged[-1].end):
+            if timestamp_seconds(t.end) > timestamp_seconds(merged[-1].end):
+                merged[-1].end = t.end
+            continue
+        merged.append(t.model_copy(update={"summary": _sentence(t.summary)}))
     return merged
 
 
@@ -255,87 +281,158 @@ def _repair(groups: list[list[int]], count: int) -> list[list[int]]:
     return repaired + [[i] for i in range(1, count + 1) if i not in seen]
 
 
-def _combine(items: list[Point] | list[ActionItem]) -> MergedPoint | MergedAction:
-    """One merged item: earliest wording and quote, every timestamp, most specific owner/due."""
+def _timeline(items: list) -> tuple[list, list[str]]:
+    """Items in time order, and their distinct timestamps."""
     items = sorted(items, key=lambda i: timestamp_seconds(i.timestamp))
-    first = items[0]
-    timestamps = list(dict.fromkeys(i.timestamp for i in items))
-    if isinstance(first, ActionItem):
-        specific = lambda field: next(
-            (getattr(i, field) for i in items if getattr(i, field) not in VAGUE), getattr(first, field)
-        )
-        return MergedAction(timestamps=timestamps, quote=first.quote, task=first.task,
-                            owner=specific("owner"), due=specific("due"))
-    return MergedPoint(timestamps=timestamps, quote=first.quote, text=first.text)
+    return items, list(dict.fromkeys(i.timestamp for i in items))
 
 
-def _describe(field: str, item: Point | ActionItem) -> str:
-    if field == "action_items":
-        return f"({item.timestamp}) {item.owner} · {item.due} · {item.task}"
+def _plain(text: str) -> str:
+    """Lowercase, no accents: for comparing against NOT_SAID / VAGUE_DUE."""
+    return " ".join(re.findall(r"\w+", unicodedata.normalize("NFD", text.lower())
+                                       .encode("ascii", "ignore").decode()))
+
+
+def _value(text: str, vague: set[str] = frozenset()) -> str | None:
+    """A real value, or None for empty / placeholder / vague answers."""
+    return None if not text.strip() or _plain(text) in NOT_SAID | vague else text.strip()
+
+
+def _first(values, vague: set[str] = frozenset()) -> str | None:
+    """First real value, or None: unknowns stay None for the renderer to localize."""
+    return next((v for v in (_value(v, vague) for v in values) if v), None)
+
+
+def _sentence(text: str) -> str:
+    """Money normalized, first letter capitalized."""
+    text = normalize_money(text.strip())
+    return text[:1].upper() + text[1:]
+
+
+def _combine_topics(spans: list[TopicSpan]) -> dict:
+    spans = sorted(spans, key=lambda t: timestamp_seconds(t.start))
+    return {"title": _sentence(spans[0].title), "start": spans[0].start,
+            "end": max((t.end for t in spans), key=timestamp_seconds)}
+
+
+def _combine_entry(points: list[Point]) -> dict:
+    points, timestamps = _timeline(points)
+    return {"text": _sentence(points[0].text), "timestamps": timestamps}
+
+
+def _combine_commitment(items: list[Commitment]) -> dict:
+    items, timestamps = _timeline(items)
+    return {"what": _sentence(items[0].what), "who": _first((i.who for i in items), RECIPIENTS),
+            "for_recipients": any(i.for_recipients or _plain(i.who) in RECIPIENTS for i in items),
+            "due": _first((i.due for i in items), VAGUE_DUE), "timestamps": timestamps}
+
+
+def _describe(field: str, item) -> str:
+    if field == "topics":
+        return f"({item.start}–{item.end}) {item.title}"
+    if field == "commitments":
+        who = item.who or ("recipients" if item.for_recipients else "nobody named")
+        return f"({item.timestamp}) {who} · {item.due or 'no deadline'} · {item.what}"
     return f"({item.timestamp}) {item.text}"
 
 
 def _merge_plan(pools: dict[str, list]) -> MergePlan:
     """Ask the LLM which items are the same fact. Returns number groups (1-based)."""
     sections = []
-    for field in MERGE_FIELDS:
+    for field in GROUPED_FIELDS:
         lines = [f"[{n}] {_describe(field, item)}" for n, item in enumerate(pools[field], 1)]
         sections.append(f"## {field}\n" + ("\n".join(lines) or "(none)"))
     return ask(load_prompt("merge", items="\n\n".join(sections)), MergePlan)
 
 
-def _drop_covered(notable: list[MergedPoint], tangents: list[Tangent],
-                  meetings: list) -> list[MergedPoint]:
-    """Each fact belongs in one field: drop `notable` items that just repeat a tangent (same
-    time range) or the next meeting (same timestamp). The model does this despite the prompt."""
-    meeting_times = {m.timestamp for m in meetings}
+def _topic_of(timestamp: str, topics: list[Topic]) -> str | None:
+    """The topic being discussed at `timestamp`: the latest topic that started by then."""
+    at = timestamp_seconds(timestamp)
+    started = [t for t in topics if timestamp_seconds(t.start) <= at]
+    return started[-1].id if started else (topics[0].id if topics else None)
 
-    def covered(point: MergedPoint) -> bool:
-        at = timestamp_seconds(point.timestamps[0])
-        in_tangent = any(
-            timestamp_seconds(start) <= at <= timestamp_seconds(end)
-            for start, end in (_range_bounds(t.range) for t in tangents)
-        )
-        return in_tangent or point.timestamps[0] in meeting_times
 
-    return [p for p in notable if not covered(p)]
+def _covered(timestamp: str, tangents: list[Tangent], meeting_times: set[str]) -> bool:
+    """An observation that only repeats a tangent (same range) or the next meeting."""
+    at = timestamp_seconds(timestamp)
+    in_tangent = any(timestamp_seconds(t.start) <= at <= timestamp_seconds(t.end) for t in tangents)
+    return in_tangent or timestamp in meeting_times
+
+
+def _source(folder: Path, segments_end: float) -> Source:
+    meta = json.loads((folder / "meta.json").read_text())
+    seconds = meta.get("transcription", {}).get("audio_seconds", segments_end)
+    return Source(sender=meta.get("sender"), memo_date=meta.get("date"),
+                  duration=format_timestamp(seconds), language=meta.get("language", ""))
 
 
 def is_merged(folder: Path) -> bool:
-    return (folder / MERGED_NAME).exists()
+    return (folder / MINUTES_NAME).exists()
 
 
-def merge(folder: Path) -> tuple[Merged, int]:
-    """Combine extractions.json into merged.json. Returns (merged, duplicates removed)."""
+def merge(folder: Path) -> tuple[Minutes, int]:
+    """Combine extractions.json into minutes.json. Returns (minutes, duplicates removed)."""
     chunks = [ChunkExtraction.model_validate(c)
               for c in json.loads((folder / EXTRACTIONS_NAME).read_text())]
-    pools = {field: [item for c in chunks for item in getattr(c, field)] for field in MERGE_FIELDS}
+    pools = {field: [item for c in chunks for item in getattr(c, field)] for field in GROUPED_FIELDS}
 
     # One chunk: extraction already listed each fact once, so there is nothing to group.
     needs_llm = len(chunks) > 1 and any(len(items) > 1 for items in pools.values())
     plan = _merge_plan(pools) if needs_llm else MergePlan(**{
         field: [{"fact": "", "items": [n]} for n in range(1, len(pools[field]) + 1)]
-        for field in MERGE_FIELDS
+        for field in GROUPED_FIELDS
     })
+    grouped = {
+        field: [[pools[field][i - 1] for i in group]
+                for group in _repair([g.items for g in getattr(plan, field)], len(pools[field]))]
+        for field in GROUPED_FIELDS
+    }
 
-    merged_items = {}
-    for field in MERGE_FIELDS:
-        groups = _repair([g.items for g in getattr(plan, field)], len(pools[field]))
-        combined = [_combine([pools[field][i - 1] for i in group]) for group in groups]
-        merged_items[field] = sorted(combined, key=lambda m: timestamp_seconds(m.timestamps[0]))
+    topic_data = sorted((_combine_topics(g) for g in grouped["topics"]),
+                        key=lambda t: timestamp_seconds(t["start"]))
+    # The model's end times are unreliable: a topic ends where the next one starts.
+    for current, following in zip(topic_data, topic_data[1:]):
+        current["end"] = following["start"]
+    topics = [Topic(id=f"T{n}", **t) for n, t in enumerate(topic_data, 1)]
 
+    tangents = _merge_tangents([t for c in chunks for t in c.tangents])
     meetings = sorted((m for c in chunks for m in c.next_meeting),
                       key=lambda m: timestamp_seconds(m.timestamp))
-    tangents = _merge_tangents([t for c in chunks for t in c.tangents])
-    merged_items["notable"] = _drop_covered(merged_items["notable"], tangents, meetings)
-    merged = Merged(
-        topics=_union([t for c in chunks for t in c.topics]),
-        participants=[p for p in _union([p for c in chunks for p in c.participants])
-                      if _key(p) not in NOT_PARTICIPANTS],
+    meeting_times = {m.timestamp for m in meetings}
+
+    entries = {}
+    for field, prefix in ENTRY_FIELDS.items():
+        data = sorted((_combine_entry(g) for g in grouped[field]),
+                      key=lambda e: timestamp_seconds(e["timestamps"][0]))
+        if field == "observations":  # each fact in one field, even when the model repeats it
+            data = [e for e in data if not _covered(e["timestamps"][0], tangents, meeting_times)]
+        entries[field] = [Entry(id=f"{prefix}{n}", topic=_topic_of(e["timestamps"][0], topics), **e)
+                          for n, e in enumerate(data, 1)]
+    commitment_data = sorted((_combine_commitment(g) for g in grouped["commitments"]),
+                             key=lambda c: timestamp_seconds(c["timestamps"][0]))
+    commitments = [MinutesCommitment(id=f"C{n}", topic=_topic_of(c["timestamps"][0], topics), **c)
+                   for n, c in enumerate(commitment_data, 1)]
+    if topics:  # the last topic runs at least until the last item filed under it
+        last_items = [ts for e in [*commitments, *(x for v in entries.values() for x in v)]
+                      if e.topic == topics[-1].id for ts in e.timestamps]
+        topics[-1].end = max([topics[-1].end, *last_items], key=timestamp_seconds)
+
+    infos = [m for c in chunks for m in c.meeting]
+    last = meetings[-1] if meetings else None  # the last mention is usually the final word
+    segments = json.loads((folder / SEGMENTS_NAME).read_text())
+    minutes = Minutes(
+        source=_source(folder, segments[-1]["end"] if segments else 0),
+        meeting=Meeting(**{f: _first(getattr(i, f) for i in infos)
+                           for f in ["group", "when", "place", "chaired_by"]}),
+        attendees=[a for a in _union([a for c in chunks for a in c.attendees])
+                   if _key(a) not in NOT_ATTENDEES],
+        topics=topics,
+        commitments=commitments,
+        next_meeting=MinutesNextMeeting(day=_value(last.day), time=_value(last.time),
+                                        place=_value(last.place)) if last else None,
         tangents=tangents,
-        next_meeting=meetings[-1:],  # the last mention is usually the final word
-        **merged_items,
+        **entries,
     )
-    _write_json(folder / MERGED_NAME, merged.model_dump())
-    removed = sum(len(pools[f]) - len(merged_items[f]) for f in MERGE_FIELDS)
-    return merged, removed
+    _write_json(folder / MINUTES_NAME, minutes.model_dump())
+    kept = len(topics) + len(commitments) + sum(len(e) for e in entries.values())
+    return minutes, sum(len(pool) for pool in pools.values()) - kept

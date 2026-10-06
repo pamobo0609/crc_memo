@@ -122,8 +122,8 @@ def _extract_step(folder: Path) -> None:
     count = lambda field: sum(len(getattr(r, field)) for r in results)
     console.print(
         f"[green]Extracted[/green] {len(results)} chunks in {elapsed} · "
-        f"{count('decisions')} decisions · {count('action_items')} tasks · "
-        f"{count('open_questions')} open questions (before merging) → "
+        f"{count('agreements')} agreements · {count('commitments')} commitments · "
+        f"{count('pending')} pending (before merging) → "
         f"{folder / summarize.EXTRACTIONS_NAME}"
     )
 
@@ -135,12 +135,13 @@ def _merge_step(folder: Path) -> None:
 
     started = time.monotonic()
     with console.status("Merging chunks and removing duplicates…"):
-        merged, removed = summarize.merge(folder)
+        minutes, removed = summarize.merge(folder)
     elapsed = transcribe.format_timestamp(time.monotonic() - started)
     console.print(
         f"[green]Merged[/green] in {elapsed} · removed {removed} duplicates → "
-        f"{len(merged.decisions)} decisions · {len(merged.action_items)} tasks · "
-        f"{len(merged.open_questions)} open questions → {folder / summarize.MERGED_NAME}"
+        f"{len(minutes.topics)} topics · {len(minutes.agreements)} agreements · "
+        f"{len(minutes.commitments)} commitments · {len(minutes.pending)} pending → "
+        f"{folder / summarize.MINUTES_NAME}"
     )
 
 
