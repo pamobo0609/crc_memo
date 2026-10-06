@@ -68,9 +68,11 @@ pushes; humans correct the markdown; ASCII PascalCase file names; sequential IDs
 - **4a** ✅ Evidence (quote + verified, checked in code) and provenance in `minutes.json`.
 - **4b** ✅ One `Minuta.md` (frontmatter + IDs + evidence); `vault.py`; `memo publish`
   (numbering, transcript, one living note per commitment in `Compromisos/<YYYY>/`, git).
-- **4c** `Contactos.md` (lote, owners — couples too —, phone, email), person notes with Obsidian
-  `aliases` (how each person is called in the audios),
-  generated indexes (README, `Compromisos/README.md`, `Personas/*.md`), `memo vault [check]`.
+- **4c** Names: ✅ `Propietarios.md` (one row per person: lote, phone, email) and `Externos.md`
+  (everyone else), each with «También dicen» variants — the single source of truth for names;
+  ✅ `memo vault update` applies them everywhere (never inside «quotes»), regenerates the breves,
+  skips files with uncommitted edits. Still to do: generated indexes (README,
+  `Compromisos/README.md`, `Personas/*.md` with Obsidian `aliases`), `memo vault check`.
 - **4d** PDF for the WhatsApp group via Typst, derived from `Minuta.md`.
 - **Done when:** a processed memo is published to the private repo with working links,
   commitment notes and indexes, and its PDF reads well on a phone.

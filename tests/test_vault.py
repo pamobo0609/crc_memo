@@ -114,6 +114,8 @@ def test_publish_numbers_writes_commits_and_pushes(repo, tmp_path):
     text = result.minuta.read_text()
     assert yaml.safe_load(text.split("---\n")[1])["numero"] == 1
     assert "- **[M1-C1](../../../Compromisos/2026/M1-C1.md)** · Doña Rosa" in text
+    assert (folder / "MinutaBreve.md").read_text() == \
+        vault.output.breve_from_minuta(result.minuta.read_text())
     transcript = (folder / "Transcripcion.md").read_text()
     assert "# M1 · Transcripción\n\n[00:00] Buenos días vecinos.\n\n[00:12] Les cuento.\n" in transcript
     assert sorted(p.name for p in (repo / "Compromisos/2026").iterdir()) == \
@@ -188,6 +190,7 @@ def test_date_change_moves_the_minuta_and_keeps_its_number(repo, tmp_path):
     moved = vault.publish(memo, repo)
 
     assert moved.minuta == repo / "Minutas/2026/M1-2026-09-28/Minuta.md"
+    assert (moved.minuta.parent / "MinutaBreve.md").exists()
     assert not (repo / "Minutas/2026/M1-2026-09-27").exists()
 
 
@@ -265,19 +268,220 @@ def test_init_creates_an_empty_vault_once(tmp_path):
     created = vault.init(path)
 
     assert sorted(p.relative_to(path).as_posix() for p in created) == [
-        ".gitignore", ".obsidian/app.json", "Contactos.md", "README.md"]
+        ".gitignore", ".obsidian/app.json", "Configuracion.md", "Externos.md", "Propietarios.md",
+        "README.md"]
     app_json = json.loads((path / ".obsidian/app.json").read_text())
     assert app_json == {"useMarkdownLinks": True, "newLinkFormat": "relative",
                         "alwaysUpdateLinks": True}
     assert git(path, "rev-parse", "--is-inside-work-tree") == "true"
-    assert "| Lote | Propietarios | Teléfono | Correo | Notas |" in (path / "Contactos.md").read_text()
+    assert "| Nombre | Lote | Teléfono | Correo | También dicen | Notas |" in \
+        (path / "Propietarios.md").read_text()
+    assert "| Nombre | Rol |" in (path / "Externos.md").read_text()
     assert "*.pdf" in (path / ".gitignore").read_text()
 
-    (path / "Contactos.md").write_text("mis contactos")
+    (path / "Propietarios.md").write_text("mis propietarios")
     assert vault.init(path) == []  # nothing overwritten, git repo kept
-    assert (path / "Contactos.md").read_text() == "mis contactos"
+    assert (path / "Propietarios.md").read_text() == "mis propietarios"
 
 
 def test_init_in_an_existing_repo_keeps_its_history(repo):
     vault.init(repo)
     assert git(repo, "log", "--format=%s") == "init"
+
+
+
+def test_publish_never_commits_someone_elses_work_in_progress(repo, tmp_path):
+    memo = make_memo(tmp_path)
+    vault.publish(memo, repo)
+    note = repo / "Compromisos/2026/M1-C1.md"
+    note.write_text(note.read_text() + "- 2026-10-07 · editando en Obsidian\n")
+    (repo / "Diario.md").write_text("nota personal")
+    m = json.loads((memo / "minutes.json").read_text())
+    m["source"]["memo_date"] = "2026-09-28"
+    (memo / "minutes.json").write_text(json.dumps(m))
+
+    vault.publish(memo, repo)  # moves the minuta: a real commit
+
+    uncommitted = [line.split()[-1] for line in git(repo, "status", "--porcelain").splitlines()]
+    assert sorted(uncommitted) == ["Compromisos/2026/M1-C1.md", "Diario.md"]
+    changed = git(repo, "show", "--no-renames", "--name-status", "--format=", "HEAD").splitlines()
+    assert sorted(changed) == sorted([
+        "D\tMinutas/2026/M1-2026-09-27/Minuta.md", "D\tMinutas/2026/M1-2026-09-27/MinutaBreve.md",
+        "D\tMinutas/2026/M1-2026-09-27/Transcripcion.md",
+        "A\tMinutas/2026/M1-2026-09-28/Minuta.md", "A\tMinutas/2026/M1-2026-09-28/MinutaBreve.md",
+        "A\tMinutas/2026/M1-2026-09-28/Transcripcion.md"])
+
+
+
+# --- names --------------------------------------------------------------------------
+
+OWNERS = """# Propietarios
+
+| Nombre | Lote | Teléfono | Correo | También dicen | Notas |
+|---|---|---|---|---|---|
+| Doña Rosa Pérez | L-14 | 8888-0000 | rosa@ejemplo.cr | Doña Rosa; doña Rosa; Rosita | tesorera \\| fundadora |
+| Carlos Mora | L-14 | | | don Carlos; | |
+| | L-20 | | | sin nombre | |
+|  |  |  |  |  |  |
+"""
+
+OUTSIDERS = """| Rol | Nombre | También dicen |
+|---|---|---|
+| ingeniero | don Hansel | don Hansen |
+| institución | el ICE | Elise; élice |
+
+Texto después de la tabla | con barra.
+"""
+
+
+def write_names(path, owners=OWNERS, outsiders=OUTSIDERS):
+    (path / "Propietarios.md").write_text(owners)
+    (path / "Externos.md").write_text(outsiders)
+
+
+def test_read_table(tmp_path):
+    write_names(tmp_path)
+    rows = vault.read_table(tmp_path / "Propietarios.md")
+    assert rows[0]["nombre"] == "Doña Rosa Pérez" and rows[0]["tambien dicen"].startswith("Doña Rosa;")
+    assert rows[0]["notas"] == "tesorera | fundadora"  # escaped bar
+    assert len(rows) == 3  # the empty row is skipped
+    assert vault.read_table(tmp_path / "Externos.md")[1] == \
+        {"rol": "institución", "nombre": "el ICE", "tambien dicen": "Elise; élice"}
+    assert vault.read_table(tmp_path / "missing.md") == []
+    (tmp_path / "x.md").write_text("| solo encabezado |\n")
+    assert vault.read_table(tmp_path / "x.md") == []
+
+
+def test_name_map(tmp_path):
+    write_names(tmp_path)
+    names = vault.name_map(tmp_path)
+    assert names["rosita"] == names["doña rosa"] == names["doña rosa pérez"] == "Doña Rosa Pérez"
+    assert names["don hansen"] == "don Hansel" and names["elise"] == "el ICE"
+    assert "sin nombre" not in names  # a row without a name is ignored
+    (tmp_path / "nothing").mkdir()
+    assert vault.name_map(tmp_path / "nothing") == {}
+
+
+def test_a_variant_for_two_names_is_an_error(tmp_path):
+    write_names(tmp_path, outsiders="| Nombre | También dicen |\n|---|---|\n| Rosa Mora | Rosita |\n")
+    with pytest.raises(vault.VaultError, match="«Rosita» is listed for both"):
+        vault.name_map(tmp_path)
+
+
+def test_apply_names_never_touches_quotes():
+    names = {"don hansen": "don Hansel", "hansen": "don Hansel", "don hansel": "don Hansel",
+             "mauro": "don Mauro Arias", "don mauro arias": "don Mauro Arias"}
+    text = ("Responsable: don Hansen · Hansen y don Mauro Arias — [07:01] «le pregunté a don "
+            "Hansen y a Mauro» · Mauro dijo. DonMauroArias.md")
+    new, changes = vault.apply_names(text, names)
+    assert new == ("Responsable: don Hansel · don Hansel y don Mauro Arias — [07:01] «le pregunté "
+                   "a don Hansen y a Mauro» · don Mauro Arias dijo. DonMauroArias.md")
+    assert changes == {("don Hansen", "don Hansel"): 1, ("Hansen", "don Hansel"): 1,
+                       ("Mauro", "don Mauro Arias"): 1}
+    assert vault.apply_names("sin cambios", {}) == ("sin cambios", {})
+
+
+def test_publish_applies_names(repo, tmp_path):
+    write_names(repo)
+    result = vault.publish(make_memo(tmp_path), repo)
+    text = result.minuta.read_text()
+    assert "Doña Rosa Pérez (tesorera)" in text and "· Doña Rosa Pérez · Cotizar" in text
+    note = yaml.safe_load((repo / "Compromisos/2026/M1-C1.md").read_text().split("---\n")[1])
+    assert note["responsables"] == ["Doña Rosa Pérez"]
+
+
+def test_update_fixes_names_everywhere_once(repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(vault.config, "MEMOS_DIR", tmp_path)
+    memo = make_memo(tmp_path)
+    first = vault.publish(memo, repo)
+    (repo / "Diario.md").write_text("nota personal")  # someone's work in progress
+    write_names(repo)
+
+    result = vault.update(repo)
+
+    assert result.names[("Doña Rosa", "Doña Rosa Pérez")] >= 2
+    assert sorted(p.relative_to(repo).as_posix() for p in result.changed) == [
+        "Compromisos/2026/M1-C1.md", "Minutas/2026/M1-2026-09-27/Minuta.md",
+        "Minutas/2026/M1-2026-09-27/MinutaBreve.md"]
+    assert "· Doña Rosa Pérez · Cotizar" in (first.minuta.parent / "MinutaBreve.md").read_text()
+    assert (result.committed, result.pushed) == (True, True)
+    assert git(repo, "log", "-1", "--format=%s") == \
+        "Nombres: Don Carlos → Carlos Mora, Doña Rosa → Doña Rosa Pérez"
+    assert [line.split()[-1] for line in git(repo, "status", "--porcelain").splitlines()] == \
+        ["Diario.md", "Externos.md", "Propietarios.md"]
+    # A name fix isn't a hand edit: publishing again still works without --force.
+    assert vault.publish(memo, repo).number == 1
+
+    again = vault.update(repo)  # nothing left to change
+    assert (again.changed, again.committed) == ([], False)
+
+
+def test_update_regenerates_a_missing_breve(tmp_path, monkeypatch):
+    monkeypatch.setattr(vault.config, "MEMOS_DIR", tmp_path / "elsewhere")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    result = vault.publish(make_memo(tmp_path), plain)
+    (result.minuta.parent / "MinutaBreve.md").unlink()
+    write_names(plain)  # this minuta's memo isn't on this machine: nothing to sync
+    meta_free = vault.update(plain)
+    assert sorted(p.name for p in meta_free.changed) == ["M1-C1.md", "Minuta.md", "MinutaBreve.md"]
+    assert "not a git repo" in meta_free.warning
+
+
+def test_update_on_a_hand_edited_minuta_keeps_it_marked_as_edited(tmp_path, monkeypatch):
+    monkeypatch.setattr(vault.config, "MEMOS_DIR", tmp_path)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    memo = make_memo(tmp_path)
+    result = vault.publish(memo, plain)
+    result.minuta.write_text(result.minuta.read_text() + "\nNota a mano.\n")
+    write_names(plain)
+    vault.update(plain)
+    with pytest.raises(vault.VaultError, match="was edited"):
+        vault.publish(memo, plain)
+
+
+
+def test_update_skips_files_with_uncommitted_edits(repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(vault.config, "MEMOS_DIR", tmp_path)
+    first = vault.publish(make_memo(tmp_path), repo)
+    note = repo / "Compromisos/2026/M1-C1.md"
+    note.write_text(note.read_text() + "- a medio escribir\n")
+    first.minuta.write_text(first.minuta.read_text() + "\nTambién a mano.\n")
+    write_names(repo)
+
+    result = vault.update(repo)
+
+    assert sorted(p.name for p in result.skipped) == ["M1-C1.md", "Minuta.md"]
+    assert result.changed == [] and not result.committed
+    assert "Doña Rosa ·" in note.read_text()  # untouched until it's committed
+    assert vault.uncommitted(tmp_path / "not-a-repo") == set()
+
+
+
+def test_destinatarios_names_the_recipients(repo, tmp_path):
+    (repo / "Configuracion.md").write_text("---\ndestinatarios: Vecinos del barrio\n---\n")
+    result = vault.publish(make_memo(tmp_path), repo)
+    text = result.minuta.read_text()
+    assert "> **Piden a Vecinos del barrio:**" in text
+    assert "· **Vecinos del barrio** · Enviar la lista" in text
+    assert "reciben el audio" not in text
+    assert vault.name_map(repo)["quienes reciben el audio"] == "Vecinos del barrio"
+
+
+@pytest.mark.parametrize("settings", ["---\ndestinatarios:\n---\n", "sin frontmatter"])
+def test_destinatarios_unset_keeps_the_generic_label(tmp_path, settings):
+    (tmp_path / "Configuracion.md").write_text(settings)
+    assert vault.name_map(tmp_path) == {}
+
+
+
+def test_update_message_lists_each_rename_once(tmp_path, monkeypatch, repo):
+    monkeypatch.setattr(vault.config, "MEMOS_DIR", tmp_path)
+    vault.publish(make_memo(tmp_path), repo)
+    (repo / "Configuracion.md").write_text("---\ndestinatarios: Vecinos del barrio\n---\n")
+    result = vault.update(repo)
+    assert ("Quienes reciben el audio", "Vecinos del barrio") in result.names
+    assert ("quienes reciben el audio", "Vecinos del barrio") in result.names
+    assert git(repo, "log", "-1", "--format=%s") == \
+        "Nombres: Quienes reciben el audio → Vecinos del barrio"

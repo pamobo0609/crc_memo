@@ -130,7 +130,7 @@ data/                        ← gitignored, never synced by this tool
 
 Published minutas go to **your own vault**: a folder of plain Spanish markdown that is also a
 git repo. Open it with [Obsidian](https://obsidian.md) (free) for its search — properties like
-`[estado:abierto]`, tags, aliases — and it still reads well on GitHub. `memo vault init` sets
+`[estado:abierto]`, tags — and it still reads well on GitHub. `memo vault init` sets
 Obsidian to markdown links with relative paths, so links work in both. **This repo never contains a vault or any minuta**: it's public,
 so `crc_memo` refuses a vault inside its own folder. Where your vault lives and who can see it
 is up to you — a **private** GitHub repo (free) is what this project was built around.
@@ -145,17 +145,20 @@ uv run memo publish <memo id>                        # writes, commits and pushe
 
 ```
 MinutasVault/
-├── Contactos.md                    ← owners per lote (couples too), phone, email — you fill it
+├── Propietarios.md                 ← one row per owner: lote, phone, email, name variants
+├── Externos.md                     ← everyone else named in the audios (engineers, institutions…)
 ├── Minutas/2026/M12-2026-09-27/
 │   ├── Minuta.md                   ← every item: code (M12-C3) + [mm:ss] «exact quote»
 │   └── Transcripcion.md            ← the evidence every [mm:ss] points to
 ├── Compromisos/2026/M12-C3.md      ← one note per commitment: estado + seguimiento
-└── Personas/RosaPerez.md           ← one note per person; `aliases:` = how the audios call her
+└── Minutas/…/MinutaBreve.md         ← the short minuta for the group, derived from Minuta.md
 ```
 
 The audio never goes to the vault (only its SHA-256, so anyone can check which recording a
 minuta came from). Correct a minuta by editing its `Minuta.md`; git history shows who changed
-what. Republishing keeps the number and refuses to overwrite a hand-edited minuta without
+what. Names are fixed once: list how each person appears ("También dicen") in
+`Propietarios.md` / `Externos.md` and run `memo vault update` — every minuta and commitment
+gets the right name, while «quotes» stay exactly as said. Republishing keeps the number and refuses to overwrite a hand-edited minuta without
 `--force`.
 
 ## Costa Rican Spanish

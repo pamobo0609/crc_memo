@@ -20,10 +20,12 @@ from crc_memo.schemas import Evidence, Minutes, MinutesCommitment, Prose
 from crc_memo.summarize import MINUTES_NAME, PROSE_NAME, timestamp_seconds
 
 MINUTA_NAME = "Minuta.md"
+BREVE_NAME = "MinutaBreve.md"  # derived from Minuta.md: what the WhatsApp group reads
 
 LABELS = {
     "es": {
         "minuta": "Minuta", "untitled": "Reunión", "due_label": "plazo",
+        "generated_from": "Generada desde Minuta.md: corrija allá, no aquí.",
         "meeting": "Reunión", "per_audio": "según el audio del {date}", "place": "Lugar",
         "chaired_by": "Presidió", "told_by": "Relato de", "audio": "audio de {duration}",
         "audio_dated": "audio de {duration} del {date}",
@@ -44,6 +46,7 @@ LABELS = {
     },
     "en": {
         "minuta": "Minutes", "untitled": "Meeting", "due_label": "due",
+        "generated_from": "Generated from Minuta.md: correct it there, not here.",
         "meeting": "Meeting", "per_audio": "per the audio of {date}", "place": "Place",
         "chaired_by": "Chaired by", "told_by": "Told by", "audio": "{duration} audio",
         "audio_dated": "{duration} audio of {date}",
@@ -265,6 +268,49 @@ def render_minuta(m: Minutes, prose: Prose, number: int | None = None,
     return dump_frontmatter(frontmatter(m, prose, number)) + "\n" + body
 
 
+# The breve drops evidence (" — [03:45] «…»" to the end of the line) and links ([text](url)).
+EVIDENCE_RE = re.compile(r" — \[\d{1,2}:\d{2}(?::\d{2})?\].*$")
+LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+
+
+def split_frontmatter(text: str) -> tuple[dict, str]:
+    """(frontmatter, body) of a markdown file; ({}, text) without valid frontmatter."""
+    match = re.match(r"\A---\n(.*?)\n---\n", text, re.DOTALL)
+    if not match:
+        return {}, text
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return {}, text
+    return (data if isinstance(data, dict) else {}), text[match.end():]
+
+
+def breve_from_minuta(text: str) -> str:
+    """MinutaBreve.md, derived from Minuta.md so human corrections there carry over: header,
+    the requests to the recipients, resumen, acuerdos, compromisos, pendientes and next
+    meeting, with IDs but without quotes, times, links, attendees, topics, observations or
+    digressions."""
+    front, body = split_frontmatter(text)
+    labels = labels_for(front.get("idioma") or "es")
+    dropped = {labels["topics"], labels["observations"], labels["tangents"]}
+    lines, skipping, footer = [], False, False
+    for line in body.split("\n"):
+        if line.startswith("## "):
+            skipping = line[3:].strip() in dropped
+        elif line == "---":
+            skipping, footer = False, True
+        if skipping or line.startswith(f"**{labels['attendees']}:**"):
+            continue
+        if footer and line.startswith(labels["footer_times"]):
+            lines[-1] += "*"  # the footer's closing * was on the dropped line
+            continue
+        lines.append(LINK_RE.sub(r"\1", EVIDENCE_RE.sub("", line)))
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip("\n")
+    head = dump_frontmatter({"numero": front.get("numero"), "fecha": front.get("fecha"),
+                             "titulo": front.get("titulo"), "tags": ["minuta-breve"]})
+    return f"{head}<!-- {labels['generated_from']} -->\n\n{text}\n"
+
+
 def load(folder: Path) -> tuple[Minutes, Prose]:
     return (Minutes.model_validate_json((folder / MINUTES_NAME).read_text()),
             Prose.model_validate_json((folder / PROSE_NAME).read_text()))
@@ -274,5 +320,7 @@ def write(folder: Path) -> list[Path]:
     """Render Minuta.md (unnumbered) into the memo folder. Cheap and deterministic, so it
     always reruns; `memo publish` renders the numbered version into the vault."""
     path = folder / MINUTA_NAME
-    path.write_text(render_minuta(*load(folder)))
-    return [path]
+    text = render_minuta(*load(folder))
+    path.write_text(text)
+    (folder / BREVE_NAME).write_text(breve_from_minuta(text))
+    return [path, folder / BREVE_NAME]

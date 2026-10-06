@@ -238,7 +238,8 @@ def test_reprocess_reruns_from_extract_and_keeps_history(memo, llm_calls):
     assert len(llm_calls) == before + 1  # the empty extraction needs no merge/write calls
     (archive,) = (memo / "history").iterdir()
     assert sorted(p.name for p in archive.iterdir()) == [
-        "Minuta.md", "extractions.json", "meta.json", "minutes.json", "prose.json"]
+        "Minuta.md", "MinutaBreve.md", "extractions.json", "meta.json", "minutes.json",
+        "prose.json"]
 
 
 def test_reprocess_from_merge_keeps_earlier_steps(memo, llm_calls):
@@ -260,7 +261,7 @@ def test_sender_alone_only_rerenders(memo, llm_calls):
 
 
 def test_reprocess_without_outputs_archives_nothing(memo):
-    for name in ["extractions.json", "minutes.json", "prose.json", "Minuta.md"]:
+    for name in ["extractions.json", "minutes.json", "prose.json", "Minuta.md", "MinutaBreve.md"]:
         (memo / name).unlink()
     result = runner.invoke(app, ["reprocess", memo.name])
     assert result.exit_code == 0
@@ -353,7 +354,7 @@ def test_vault_init(tmp_path):
     result = runner.invoke(app, ["vault", "init", str(tmp_path / "MinutasVault")])
     assert result.exit_code == 0, result.output
     assert "Created" in result.output and "private" in result.output
-    assert (tmp_path / "MinutasVault" / "Contactos.md").exists()
+    assert (tmp_path / "MinutasVault" / "Propietarios.md").exists()
 
 
 def test_vault_init_refuses_the_project_folder():
@@ -361,3 +362,32 @@ def test_vault_init_refuses_the_project_folder():
     assert result.exit_code == 1
     assert "this repo is public" in " ".join(result.output.split())
     assert not (config.PROJECT_DIR / "MinutasVault").exists()
+
+
+
+def test_vault_update(vault_dir, monkeypatch):
+    def fake(path, push):
+        assert push is False
+        return vault.UpdateResult(changed=[path / "a.md"], names={("Hansen", "don Hansel"): 2},
+                                  skipped=[path / "M1-C8.md"], committed=True)
+    monkeypatch.setattr(vault, "update", fake)
+    result = runner.invoke(app, ["vault", "update", "--no-push"])
+    assert result.exit_code == 0, result.output
+    assert "Hansen → don Hansel ×2" in result.output and "Updated 1 files" in result.output
+    assert "committed (not pushed)" in result.output
+    assert "skipped M1-C8.md: it has uncommitted changes" in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize("pushed, warning, expected", [
+    (True, None, "committed and pushed"), (False, "not a git repo", "⚠ not a git repo"),
+    (False, None, "nothing changed")])
+def test_vault_update_reports(vault_dir, monkeypatch, pushed, warning, expected):
+    monkeypatch.setattr(vault, "update", lambda path, push: vault.UpdateResult(
+        pushed=pushed, committed=pushed, warning=warning))
+    assert expected in runner.invoke(app, ["vault", "update"]).output
+
+
+def test_vault_update_error(monkeypatch):
+    monkeypatch.delenv("CRC_MEMO_VAULT", raising=False)
+    result = runner.invoke(app, ["vault", "update"])
+    assert result.exit_code == 1 and "Set CRC_MEMO_VAULT" in result.output

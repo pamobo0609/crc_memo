@@ -39,7 +39,7 @@ STEP_FILES = {
     Step.extract: [summarize.EXTRACTIONS_NAME],
     Step.merge: [summarize.MINUTES_NAME],
     Step.write: [summarize.PROSE_NAME],
-    Step.render: [output.MINUTA_NAME],
+    Step.render: [output.MINUTA_NAME, output.BREVE_NAME],
 }
 HISTORY_DIR = "history"
 
@@ -322,6 +322,33 @@ def vault_init(path: Path = typer.Argument(..., help="Folder for the new vault, 
         f"  2. export {vault.VAULT_ENV}={path}   [dim](e.g. in ~/.zshrc)[/dim]\n"
         "  3. uv run memo publish <memo id>"
     )
+
+
+@vault_app.command("update")
+def vault_update(
+    push: bool = typer.Option(True, "--push/--no-push", help="Push the vault after committing."),
+) -> None:
+    """Apply the names in Propietarios.md and Externos.md to every minuta and commitment
+    (never inside «quotes»), regenerate the short minutas, commit and push."""
+    try:
+        result = vault.update(vault.vault_dir(), push=push)
+    except vault.VaultError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    for (found, correct), count in sorted(result.names.items()):
+        console.print(f"  {found} → [bold]{correct}[/bold] ×{count}")
+    console.print(f"[green]Updated[/green] {len(result.changed)} files")
+    for path in result.skipped:
+        console.print(f"[yellow]⚠ skipped {path.name}: it has uncommitted changes. Commit them, "
+                      "then run this again.[/yellow]")
+    if result.warning:
+        console.print(f"[yellow]⚠ {result.warning}[/yellow]")
+    elif result.pushed:
+        console.print("  committed and pushed")
+    elif result.committed:
+        console.print("  committed (not pushed)")
+    else:
+        console.print("  nothing changed")
 
 
 @app.command("list")

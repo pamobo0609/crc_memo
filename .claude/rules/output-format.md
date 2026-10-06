@@ -66,3 +66,10 @@ Los minutos [mm:ss] indican dónde verificarlo en el audio.*
 - Human-owned after publish: Minuta.md (republish needs `--force` if edited), commitment
   notes (never overwritten: they hold status + Seguimiento).
 - `memo publish ID` commits and pushes (`--no-push`); deterministic commit message.
+- `MinutaBreve.md` (generated, never edit): derived from `Minuta.md` by `breve_from_minuta()`
+  — header, recipients callout, resumen, acuerdos, compromisos, pendientes, next meeting; IDs
+  kept; quotes, times, links, attendees, topics, observations, digressions dropped.
+- Names: `Propietarios.md` (one row per person) + `Externos.md`, column «También dicen»
+  (`;`-separated) → `name_map()`; `apply_names()` replaces whole words, case-insensitive,
+  longest first, never inside «quotes» or in Transcripcion.md. Applied on publish and by
+  `memo vault update`, which skips files with uncommitted edits and commits only what it changed.

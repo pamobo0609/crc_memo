@@ -202,9 +202,10 @@ def test_unknown_language_uses_english_labels():
 def test_write_renders_minuta_md(tmp_path):
     (tmp_path / "minutes.json").write_text(minutes().model_dump_json())
     (tmp_path / "prose.json").write_text(json.dumps(PROSE.model_dump()))
-    (path,) = output.write(tmp_path)
-    assert path.name == "Minuta.md"
+    path, breve = output.write(tmp_path)
+    assert (path.name, breve.name) == ("Minuta.md", "MinutaBreve.md")
     assert path.read_text() == output.render_minuta(minutes(), PROSE)
+    assert breve.read_text() == output.breve_from_minuta(path.read_text())
 
 
 def test_minutes_from_before_phase_4_still_load_and_render():
@@ -221,3 +222,49 @@ def test_minutes_from_before_phase_4_still_load_and_render():
                                              ("ayer", "ayer")])
 def test_yaml_date(value, expected):
     assert output.yaml_date(value) == expected
+
+
+# --- the breve, derived from Minuta.md --------------------------------------------------
+
+def test_breve_keeps_what_the_group_reads():
+    full = output.render_minuta(minutes(), PROSE, 12)
+    breve = output.breve_from_minuta(full)
+
+    front, body = output.split_frontmatter(breve)
+    assert front == {"numero": 12, "fecha": date(2026, 10, 5),
+                     "titulo": "Reunión de la Asociación de Vecinos", "tags": ["minuta-breve"]}
+    assert body.startswith("<!-- Generada desde Minuta.md: corrija allá, no aquí. -->\n\n"
+                           "# M12 · Minuta — Reunión de la Asociación de Vecinos\n")
+    assert "> **Piden a quienes reciben el audio:**" in body and "## Resumen\n" in body
+    assert "- **M12-A2** La cuota mensual sube a **₡5.000** desde noviembre.\n" in body
+    assert "- **M12-C1** · Doña Rosa · Cotizar la pintura del salón · plazo: antes del 15\n" in body
+    assert "- **M12-P1** ¿Dará la municipalidad el permiso?\n" in body
+    assert "## Próxima reunión\n" in body
+    for absent in ["«", "[00:", "Compromisos/", "Asistentes", "Temas tratados", "Observaciones",
+                   "Desvíos", "Los minutos [mm:ss]", "\n\n\n"]:
+        assert absent not in body
+    assert body.endswith("no es un acta oficial.*\n")
+
+
+def test_breve_follows_corrections_in_minuta():
+    full = output.render_minuta(minutes(), PROSE, 12).replace("Doña Rosa ·", "Don Jorge ·")
+    assert "- **M12-C1** · Don Jorge · Cotizar" in output.breve_from_minuta(full)
+
+
+def test_breve_in_english_and_without_frontmatter():
+    m = minutes(source=Source(sender=None, memo_date=None, duration="05:00", language="en"))
+    breve = output.breve_from_minuta(output.render_minuta(m, PROSE))
+    assert "Generated from Minuta.md" in breve and "Topics discussed" not in breve
+    assert breve.endswith("not official minutes.*\n")
+    bare = output.breve_from_minuta("# Minuta — x\n\n## Temas tratados\nfuera\n")
+    assert "numero: null" in bare and "fuera" not in bare  # no frontmatter: Spanish labels
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("---\nnumero: 1\n---\ncuerpo", ({"numero": 1}, "cuerpo")),
+    ("sin frontmatter", ({}, "sin frontmatter")),
+    ("---\nnumero: [\n---\ncuerpo", ({}, "---\nnumero: [\n---\ncuerpo")),
+    ("---\n- lista\n---\ncuerpo", ({}, "cuerpo")),
+])
+def test_split_frontmatter(text, expected):
+    assert output.split_frontmatter(text) == expected

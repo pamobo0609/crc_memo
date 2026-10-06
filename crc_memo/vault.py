@@ -31,7 +31,14 @@ VAULT_ENV = "CRC_MEMO_VAULT"
 # The vault is in Spanish: folders, file names, frontmatter keys and labels, whatever the
 # memo's language (the prose stays as written).
 VAULT_LANGUAGE = "es"
-CONTACTS_NAME = "Contactos.md"
+# Who's who, edited once and applied everywhere (`memo vault update`):
+OWNERS_NAME = "Propietarios.md"   # the group's owners: lote, phone, email
+OUTSIDERS_NAME = "Externos.md"    # everyone else named in the audios: engineers, institutions…
+VARIANTS_COLUMN = "Tambien dicen"  # how the minutas call them, separated by ;
+# This vault's settings (frontmatter). `destinatarios`: what to call the people receiving the
+# audios, e.g. the group's name, instead of the generic label. Lives in the vault, never in
+# this public repo.
+SETTINGS_NAME = "Configuracion.md"
 PEOPLE_DIR = "Personas"
 # Obsidian settings for a new vault: markdown links with relative paths (Obsidian's default is
 # [[wikilinks]], which GitHub doesn't render), kept up to date when files move.
@@ -175,6 +182,13 @@ def render_commitment(c: MinutesCommitment, m: Minutes, number: int) -> str:
             f"Al cerrarlo, cambie estado (cumplido / cancelado) y cerrado: AAAA-MM-DD. -->\n")
 
 
+def write_breve(minuta: Path) -> Path:
+    """MinutaBreve.md next to a Minuta.md, derived from it (corrections there carry over)."""
+    path = minuta.parent / output.BREVE_NAME
+    path.write_text(output.breve_from_minuta(minuta.read_text()))
+    return path
+
+
 def _memo_date(folder: Path, minutes: Minutes) -> str:
     """The minuta's date: the audio's (--date or WhatsApp name), else the day it was ingested."""
     if minutes.source.memo_date:
@@ -195,33 +209,41 @@ def publish(folder: Path, vault: Path, force: bool = False, push: bool = True) -
 
     target = minuta_dir(vault, number, memo_date) / output.MINUTA_NAME
     meta = ingest.read_meta(folder)
+    written: list[Path] = []  # only these get committed: never someone's work in progress
     if existing:
         edited = _sha(existing[0].read_text()) != meta.get("published", {}).get("sha256")
         if edited and not force:
             raise VaultError(f"{existing[0]} was edited after it was published (or published "
                              "from elsewhere). Use --force to replace it; git keeps the old one.")
         if existing[0] != target:  # the date changed: move it, keeping its number
-            for old in [existing[0], existing[0].parent / TRANSCRIPT_NAME]:
+            for old in [existing[0], existing[0].parent / TRANSCRIPT_NAME,
+                        existing[0].parent / output.BREVE_NAME]:
                 old.unlink(missing_ok=True)
+                written.append(old)
             if not any(existing[0].parent.iterdir()):
                 existing[0].parent.rmdir()
 
-    text = output.render_minuta(minutes, prose, number, language=VAULT_LANGUAGE)
+    names = name_map(vault)
+    text, _ = apply_names(output.render_minuta(minutes, prose, number, language=VAULT_LANGUAGE),
+                          names)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text)
-    (target.parent / TRANSCRIPT_NAME).write_text(render_transcript(folder, number, minutes))
+    transcript = target.parent / TRANSCRIPT_NAME
+    transcript.write_text(render_transcript(folder, number, minutes))
+    written += [target, write_breve(target), transcript]
     created = []
     for c in minutes.commitments:
         note = commitment_path(vault, output.item_id(c.id, number), memo_date)
         if not note.exists():
             note.parent.mkdir(parents=True, exist_ok=True)
-            note.write_text(render_commitment(c, minutes, number))
+            note.write_text(apply_names(render_commitment(c, minutes, number), names)[0])
             created.append(note)
     ingest.update_meta(folder, published={"number": number, "path": str(target.relative_to(vault)),
                                           "sha256": _sha(text)})
 
     result = PublishResult(number, target, created)
-    commit_and_push(vault, f"M{number} — minuta del {memo_date}", push, result)
+    commit_and_push(vault, f"M{number} — minuta del {memo_date}", [*written, *created], push,
+                    result)
     return result
 
 
@@ -237,9 +259,13 @@ de audios de WhatsApp y revisadas por personas. **Repositorio privado.**
   transcripción: revisar. `Transcripcion.md` al lado es la evidencia.
 - `Compromisos/<año>/M12-C3.md`: un archivo por compromiso. Para darle seguimiento, agregue
   líneas en «Seguimiento» y cambie `estado` (abierto / cumplido / cancelado).
-- `Contactos.md`: propietarios por lote, con teléfono y correo.
-- `Personas/`: una nota por persona; en `aliases` van las formas en que la mencionan
-  (doña Rosa, Rosita), así Obsidian la encuentra con cualquiera de ellas.
+- `Propietarios.md`: una fila por propietario (una pareja = dos filas con el mismo lote).
+- `Externos.md`: las demás personas e instituciones que aparecen en los audios.
+- `Configuracion.md`: ajustes de esta bóveda, por ejemplo cómo llamar a quienes reciben los
+  audios (`destinatarios`, el nombre del grupo).
+- En `Propietarios.md` y `Externos.md`, «También dicen» lista cómo aparece cada nombre en las minutas (separado por `;`).
+  Corrija ahí una sola vez y corra `memo vault update`: el nombre correcto queda en todas las
+  minutas y compromisos. Las citas «…» no se tocan: son lo que se dijo.
 
 Para corregir una minuta, edite su `Minuta.md`: el historial de git guarda quién cambió qué.
 
@@ -252,12 +278,32 @@ Para corregir una minuta, edite su `Minuta.md`: el historial de git guarda quié
 
 GITIGNORE = "# PDFs are regenerated from Minuta.md\n*.pdf\n.DS_Store\n.obsidian/workspace*.json\n"
 
-CONTACTS_TEMPLATE = """# Contactos
+OWNERS_TEMPLATE = """# Propietarios
 
-Una fila por lote. Varios propietarios (una pareja), teléfonos o correos: separados por `;`.
+Una fila por persona: una pareja son dos filas con el mismo lote. Varios lotes, teléfonos o
+correos: separados por `;`. «También dicen»: cómo aparece el nombre en las minutas (`;`).
 
-| Lote | Propietarios | Teléfono | Correo | Notas |
-|---|---|---|---|---|
+| Nombre | Lote | Teléfono | Correo | También dicen | Notas |
+|---|---|---|---|---|---|
+"""
+
+SETTINGS_TEMPLATE = """---
+destinatarios: Quienes reciben el audio
+---
+
+# Configuración
+
+- `destinatarios`: cómo llamar en las minutas a quienes reciben los audios, por ejemplo el
+  nombre del grupo. Después de cambiarlo, corra `memo vault update`.
+"""
+
+OUTSIDERS_TEMPLATE = """# Externos
+
+Personas e instituciones que aparecen en los audios y no son propietarios. «También dicen»:
+cómo aparece el nombre en las minutas, separado por `;`.
+
+| Nombre | Rol | Teléfono | Correo | También dicen | Notas |
+|---|---|---|---|---|---|
 """
 
 
@@ -266,7 +312,8 @@ def init(path: Path) -> list[Path]:
     git repo. Never overwrites a file that exists; returns the files it created."""
     check_outside_project(path)
     files = {path / "README.md": VAULT_README, path / ".gitignore": GITIGNORE,
-             path / CONTACTS_NAME: CONTACTS_TEMPLATE,
+             path / OWNERS_NAME: OWNERS_TEMPLATE, path / OUTSIDERS_NAME: OUTSIDERS_TEMPLATE,
+             path / SETTINGS_NAME: SETTINGS_TEMPLATE,
              path / ".obsidian" / "app.json": OBSIDIAN_APP}
     created = []
     for file, text in files.items():
@@ -281,6 +328,164 @@ def init(path: Path) -> list[Path]:
     return created
 
 
+# --- names: Propietarios.md + Externos.md, applied everywhere ---------------------------
+
+def _plain_header(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode()
+                    .lower().split())
+
+
+def read_table(path: Path) -> list[dict[str, str]]:
+    """The first markdown table in a file, as rows keyed by plain header ('tambien dicen').
+    Columns can be reordered or added; `\\|` is a literal bar. Missing file: no rows."""
+    if not path.exists():
+        return []
+    rows: list[list[str]] = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("|"):
+            cells = [c.strip().replace("\\|", "|")
+                     for c in re.split(r"(?<!\\)\|", line.strip("|"))]
+            rows.append(cells)
+        elif rows:
+            break  # the table ended
+    if len(rows) < 2:
+        return []
+    header = [_plain_header(h) for h in rows[0]]
+    return [dict(zip(header, cells)) for cells in rows[2:] if any(cells)]
+
+
+def _name_rows(vault: Path) -> list[tuple[str, str, list[str]]]:
+    """(file, correct name, variants) from the name tables and the vault's settings."""
+    rows = []
+    for file in [OWNERS_NAME, OUTSIDERS_NAME]:
+        for row in read_table(vault / file):
+            correct = row.get("nombre", "").strip()
+            if correct:
+                rows.append((file, correct, [v.strip() for v in
+                                             row.get(_plain_header(VARIANTS_COLUMN), "").split(";")]))
+    recipients = str(read_frontmatter(vault / SETTINGS_NAME).get("destinatarios") or "").strip() \
+        if (vault / SETTINGS_NAME).exists() else ""
+    if recipients:
+        rows.append((SETTINGS_NAME, recipients, [output.LABELS["es"]["recipients"]]))
+    return rows
+
+
+def name_map(vault: Path) -> dict[str, str]:
+    """lowercased name or variant -> the correct name, from Propietarios.md, Externos.md and
+    Configuracion.md (destinatarios). Raises VaultError when one variant points to two names."""
+    names: dict[str, str] = {}
+    for file, correct, variants in _name_rows(vault):
+        for form in [correct, *variants]:
+            if not form:
+                continue
+            if names.get(form.lower(), correct) != correct:
+                raise VaultError(f"«{form}» is listed for both {names[form.lower()]} and "
+                                 f"{correct} ({file}). Keep it in one row only.")
+            names[form.lower()] = correct
+    return names
+
+
+QUOTE_RE = re.compile(r"«[^»]*»")
+
+
+def apply_names(text: str, names: dict[str, str]) -> tuple[str, dict[tuple[str, str], int]]:
+    """Replace every listed variant with its correct name: whole words, case-insensitive,
+    longest first (so "Mauro" never touches "don Mauro Arias"). Quotes «…» are left as said.
+    Returns the new text and how many times each (found, correct) pair was replaced."""
+    if not names:
+        return text, {}
+    pattern = re.compile(r"(?<!\w)(" + "|".join(re.escape(n) for n in
+                                               sorted(names, key=len, reverse=True)) + r")(?!\w)",
+                         re.IGNORECASE)
+    changes: dict[tuple[str, str], int] = {}
+
+    def replace(match: re.Match) -> str:
+        found, correct = match.group(0), names[match.group(0).lower()]
+        if found != correct:
+            changes[(found, correct)] = changes.get((found, correct), 0) + 1
+        return correct
+
+    parts, last = [], 0
+    for quote in QUOTE_RE.finditer(text):  # names only outside the quotes
+        parts += [pattern.sub(replace, text[last:quote.start()]), quote.group(0)]
+        last = quote.end()
+    parts.append(pattern.sub(replace, text[last:]))
+    return "".join(parts), changes
+
+
+@dataclass
+class UpdateResult:
+    changed: list[Path] = field(default_factory=list)
+    skipped: list[Path] = field(default_factory=list)  # had uncommitted edits: left alone
+    names: dict[tuple[str, str], int] = field(default_factory=dict)
+    committed: bool = False
+    pushed: bool = False
+    warning: str | None = None
+
+
+def _sync_published_hash(minuta: Path, old_text: str, new_text: str) -> None:
+    """A name fix isn't a hand edit: if the memo is on this machine and its last publish
+    matches the old text, record the new text, so `memo publish` still works without --force."""
+    memo_id = read_frontmatter(minuta).get("memo_id")
+    folder = config.MEMOS_DIR / str(memo_id)
+    if not memo_id or not (folder / ingest.META_NAME).exists():
+        return
+    published = ingest.read_meta(folder).get("published", {})
+    if published.get("sha256") == _sha(old_text):
+        ingest.update_meta(folder, published=published | {"sha256": _sha(new_text)})
+
+
+def uncommitted(vault: Path) -> set[Path]:
+    """Files with changes not committed yet (someone editing in Obsidian); empty outside git."""
+    try:
+        lines = subprocess.run(["git", "-C", str(vault), "status", "--porcelain", "-z"],
+                               capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    return {vault / entry[3:] for entry in lines.split("\0") if len(entry) > 3}
+
+
+def update(vault: Path, push: bool = True) -> UpdateResult:
+    """Apply the names in Propietarios.md / Externos.md to every minuta and commitment note,
+    regenerate every MinutaBreve.md, then commit exactly those files and push. Files with
+    uncommitted edits are skipped: committing them would publish someone's unfinished work."""
+    names = name_map(vault)
+    busy = uncommitted(vault)
+    result = UpdateResult()
+    minutas = sorted((vault / MINUTAS_DIR).glob(f"*/*/{output.MINUTA_NAME}"))
+    for path in [*minutas, *sorted((vault / COMPROMISOS_DIR).glob("*/*.md"))]:
+        if path in busy:
+            result.skipped.append(path)
+            continue
+        old = path.read_text()
+        new, changes = apply_names(old, names)
+        if new != old:
+            path.write_text(new)
+            result.changed.append(path)
+            if path.name == output.MINUTA_NAME:
+                _sync_published_hash(path, old, new)
+        for pair, count in changes.items():
+            result.names[pair] = result.names.get(pair, 0) + count
+    for minuta in minutas:
+        breve = minuta.parent / output.BREVE_NAME
+        if minuta in busy:
+            continue
+        old = breve.read_text() if breve.exists() else None
+        if write_breve(minuta).read_text() != old:
+            result.changed.append(breve)
+    # One entry per rename, whatever the capitalization it was found in ("Quienes…"/"quienes…").
+    renames = dict.fromkeys((found.lower(), correct) for found, correct in sorted(result.names))
+    first_form = {(f.lower(), c): f for f, c in sorted(result.names, reverse=True)}
+    summary = ", ".join(f"{first_form[key]} → {key[1]}" for key in renames)
+    message = f"Nombres: {summary}" if summary else "Actualiza minutas breves"
+    publish_like = PublishResult(0, vault)
+    commit_and_push(vault, message, result.changed, push, publish_like)
+    result.committed, result.pushed, result.warning = (publish_like.committed, publish_like.pushed,
+                                                       publish_like.warning)
+    return result
+
+
 # --- git ----------------------------------------------------------------------------
 
 def _git(vault: Path, *args: str) -> str:
@@ -288,18 +493,22 @@ def _git(vault: Path, *args: str) -> str:
                           check=True).stdout.strip()
 
 
-def commit_and_push(vault: Path, message: str, push: bool, result: PublishResult) -> None:
-    """Commit everything the tool wrote, then push to the vault's upstream unless told not to.
-    A vault that isn't a git repo just keeps the files (with a warning)."""
+def commit_and_push(vault: Path, message: str, paths: list[Path], push: bool,
+                    result: PublishResult) -> None:
+    """Commit exactly the files the tool wrote (or removed), then push to the vault's upstream
+    unless told not to. Other changes in the vault (someone editing in Obsidian) are left
+    alone. A vault that isn't a git repo just keeps the files (with a warning)."""
     try:
         _git(vault, "rev-parse", "--is-inside-work-tree")
     except (OSError, subprocess.CalledProcessError):
         result.warning = f"{vault} is not a git repo: files written, nothing committed."
         return
-    _git(vault, "add", "--all", "--", MINUTAS_DIR, COMPROMISOS_DIR)
-    if _git(vault, "diff", "--cached", "--name-only"):
-        _git(vault, "commit", "--quiet", "-m", message)
-        result.committed = True
+    names = [str(p.relative_to(vault)) for p in paths]
+    if names:  # never `git add --all --` without paths: that would stage the whole vault
+        _git(vault, "add", "--all", "--", *names)
+        if _git(vault, "diff", "--cached", "--name-only", "--", *names):
+            _git(vault, "commit", "--quiet", "-m", message, "--", *names)
+            result.committed = True
     if not push:
         return
     try:
