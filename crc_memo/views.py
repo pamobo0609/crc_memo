@@ -27,6 +27,7 @@ ID_RE = re.compile(r"^M(\d+)-([ACPO])(\d+)$")
 EVIDENCE_LINE_RE = re.compile(r"^- (\[\d{1,2}:\d{2}(?::\d{2})?\].*)$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PHONE_RE = re.compile(r"^\+?[\d][\d \-]{6,}$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclass
@@ -69,6 +70,15 @@ class Person:
     @property
     def file(self) -> str:
         return vault.file_name(self.name) + ".md"
+
+
+ARTICLE_RE = re.compile(r"^(el|la|los|las)\s+", re.IGNORECASE)
+
+
+def name_key(name: str) -> str:
+    """How a name is looked up in the tables: lowercase, without a leading article, so
+    «la Asociación de Desarrollo» is the «Asociación de Desarrollo» of Externos.md."""
+    return ARTICLE_RE.sub("", name.strip()).lower()
 
 
 def _str(value) -> str:
@@ -122,7 +132,7 @@ def read_people(root: Path) -> list[Person]:
 # --- rendering ------------------------------------------------------------------------
 
 def _person_link(name: str, people: dict[str, Person], prefix: str) -> str:
-    person = people.get(name.lower())
+    person = people.get(name_key(name))
     return f"[{name}]({prefix}{vault.PEOPLE_DIR}/{person.file})" if person else name
 
 
@@ -194,7 +204,7 @@ def render_person(person: Person, notes: list[Note], minutas: list[MinutaInfo]) 
     lines += [shown] if shown else []
     if row.get("notas"):
         lines += ["", row["notas"]]
-    mine = [n for n in notes if person.name.lower() in (r.lower() for r in n.responsables)]
+    mine = [n for n in notes if name_key(person.name) in map(name_key, n.responsables)]
     if mine:
         lines += ["", "## Compromisos"]
         lines += [f"- [{n.id}](../{vault.COMPROMISOS_DIR}/{n.path.parent.name}/{n.path.name}) · "
@@ -208,6 +218,83 @@ def render_person(person: Person, notes: list[Note], minutas: list[MinutaInfo]) 
     return output.dump_frontmatter(front) + "\n" + "\n".join(lines) + "\n"
 
 
+# --- keeping commitment notes in step with their minuta --------------------------------
+
+COMMITMENT_LINE_RE = re.compile(r"^- \*\*\[?(M\d+-C\d+)\]?(?:\([^)]*\))?\*\* · (.*)$")
+STATUS_LINE_RE = re.compile(r"^\*\*Responsable:\*\*.*$", re.MULTILINE)
+
+
+@dataclass
+class Said:
+    """A commitment as the minuta states it: who, what, by when."""
+    owner: str | None
+    what: str
+    plazo: str | None
+
+
+def parse_commitments(text: str) -> dict[str, Said]:
+    """The commitment lines of a Minuta.md: '- **[M1-C3](…)** · owner · what · plazo: x — […]'."""
+    labels = output.labels_for(vault.VAULT_LANGUAGE)
+    section, said = None, {}
+    for line in output.split_frontmatter(text)[1].splitlines():
+        if line.startswith("## "):
+            section = line[3:].strip()
+            continue
+        match = COMMITMENT_LINE_RE.match(line) if section == labels["commitments"] else None
+        if not match:
+            continue
+        parts = output.EVIDENCE_RE.sub("", match[2]).split(" · ")
+        due_prefix = f"{labels['due_label']}: "
+        plazo = parts.pop()[len(due_prefix):].strip() if parts[-1].startswith(due_prefix) else None
+        owner = parts[0].strip().strip("*").strip() if parts else ""
+        said[match[1]] = Said(owner=None if owner in ("", labels["unassigned"]) else owner,
+                              what=" · ".join(parts[1:]).strip(),
+                              plazo=None if plazo in (None, "", labels["no_due"]) else plazo)
+    return said
+
+
+def _synced(text: str, cid: str, said: Said) -> str:
+    """A note with the minuta's owner, task and plazo; status and follow-ups untouched."""
+    labels = output.labels_for(vault.VAULT_LANGUAGE)
+    front, body = output.split_frontmatter(text)
+    raw_front = text[:len(text) - len(body)]
+    wanted = {"responsables": [said.owner] if said.owner else [], "plazo": said.plazo}
+    if any(front.get(key) != value for key, value in wanted.items()):
+        raw_front = output.dump_frontmatter(front | wanted)  # same key order, new values
+    body = re.sub(rf"^# {re.escape(cid)} · .*$", f"# {cid} · {said.what}", body, count=1,
+                  flags=re.MULTILINE)
+    status = (f"**Responsable:** {said.owner or labels['unassigned']} · "
+              f"**Plazo:** {said.plazo or labels['no_due']} · "
+              f"**Estado:** {str(front.get('estado') or 'abierto').strip()}")
+    body = STATUS_LINE_RE.sub(lambda _: status, body, count=1)
+    return raw_front + body
+
+
+def sync_commitments(root: Path, busy: set[Path] = frozenset()) -> tuple[list[Path], list[Path]]:
+    """The minuta is the source of what was said: a commitment removed from it loses its note
+    (git keeps the history); a changed owner, task or plazo is copied into the note. Status,
+    `cerrado` and Seguimiento stay as people wrote them. Returns (updated, removed)."""
+    notes = read_notes(root)
+    updated, removed = [], []
+    for minuta in read_minutas(root):
+        if minuta.numero is None or minuta.path in busy:
+            continue
+        said = parse_commitments(minuta.text)
+        for note in (n for n in notes if n.minuta == f"M{minuta.numero}"):
+            if note.path in busy:
+                continue
+            if note.id not in said:
+                note.path.unlink()
+                removed.append(note.path)
+                continue
+            old = note.path.read_text()
+            new = _synced(old, note.id, said[note.id])
+            if new != old:
+                note.path.write_text(new)
+                updated.append(note.path)
+    return updated, removed
+
+
 # --- writing ------------------------------------------------------------------------
 
 def build(root: Path, busy: set[Path] = frozenset()) -> tuple[list[Path], list[Path]]:
@@ -215,7 +302,7 @@ def build(root: Path, busy: set[Path] = frozenset()) -> tuple[list[Path], list[P
     Files with uncommitted edits are skipped like everywhere else; person pages for people
     no longer in the tables are removed."""
     notes, minutas, people = read_notes(root), read_minutas(root), read_people(root)
-    by_name = {p.name.lower(): p for p in people}
+    by_name = {name_key(p.name): p for p in people}
     wanted = {
         root / vault.MINUTAS_DIR / INDEX_NAME: render_minutas_index(minutas, notes),
         root / vault.COMPROMISOS_DIR / INDEX_NAME: render_commitments_index(notes, by_name),
@@ -312,11 +399,15 @@ def _check_notes(notes: list[Note], minutas: list[MinutaInfo], known: set[str],
         elif note.estado != "abierto" and not note.cerrado:
             out.append(Problem(note.path, _line_of(text, "cerrado:"),
                                f"está {note.estado}: falta la fecha en `cerrado`", warning=True))
+        if note.cerrado and not DATE_RE.match(note.cerrado):
+            out.append(Problem(note.path, _line_of(text, "cerrado:"),
+                               f"`cerrado: {note.cerrado[:40]}` debe ser una fecha AAAA-MM-DD; "
+                               "el detalle va en «Seguimiento»"))
         if note.minuta not in published:
             out.append(Problem(note.path, _line_of(text, "minuta:"),
                                f"la minuta {note.minuta or '?'} no existe"))
         for name in note.responsables:
-            if name.lower() not in known:
+            if name_key(name) not in known:
                 out.append(Problem(note.path, _line_of(text, name),
                                    f"«{name}» no está en {vault.OWNERS_NAME} ni en "
                                    f"{vault.OUTSIDERS_NAME}", warning=True))
@@ -347,12 +438,12 @@ def check(root: Path) -> CheckResult:
     """Validate what humans edit: minutas, commitment notes and the name tables."""
     result = CheckResult()
     try:
-        known = set(vault.name_map(root))
+        known = {name_key(n) for n in vault.name_map(root)}
     except vault.VaultError as e:
         result.problems.append(Problem(root / vault.OUTSIDERS_NAME, 1, str(e)))
         known = set()
     labels = output.labels_for(vault.VAULT_LANGUAGE)
-    known |= {labels[k].lower() for k in ["speaker", "recipients", "unassigned"]}
+    known |= {name_key(labels[k]) for k in ["speaker", "recipients", "unassigned"]}
     notes, minutas = read_notes(root), read_minutas(root)
     _check_tables(root, result.problems)
     _check_minutas(minutas, notes, result.problems)

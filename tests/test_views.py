@@ -224,3 +224,116 @@ def test_check_sorts_problems_by_file_and_line(root):
     set_front(note(root, "M1-C3"), responsables=["Fulano"], estado="?")
     problems = views.check(root).problems
     assert problems == sorted(problems, key=lambda p: (p.path.as_posix(), p.line))
+
+
+# --- notes follow their minuta ---------------------------------------------------------
+
+def minuta_path(root):
+    return root / "Minutas/2026/M1-2026-09-27/Minuta.md"
+
+
+def edit_minuta(root, old, new):
+    path = minuta_path(root)
+    text = path.read_text()
+    assert old in text, old
+    path.write_text(text.replace(old, new))
+
+
+def test_parse_commitments(root):
+    said = views.parse_commitments(minuta_path(root).read_text())
+    assert list(said) == ["M1-C1", "M1-C2", "M1-C3", "M1-C4"]
+    assert said["M1-C1"] == views.Said("Doña Rosa", "Cotizar la pintura del salón", "antes del 15")
+    assert said["M1-C2"] == views.Said(None, "Hablar con la municipalidad", None)  # sin asignar, sin fecha
+    assert said["M1-C3"].owner == "Quienes reciben el audio"  # bold stripped
+    text = ("## Compromisos\n- **M2-C1** · Ana · Llamar · al banco\n"  # plain ID, no plazo part
+            "## Acuerdos\n- **[M2-C9](x.md)** · No · es · un compromiso\n")
+    assert views.parse_commitments(text) == {"M2-C1": views.Said("Ana", "Llamar · al banco", None)}
+
+
+def test_a_removed_commitment_loses_its_note(root):
+    edit_minuta(root, next(l for l in minuta_path(root).read_text().splitlines()
+                           if l.startswith("- **[M1-C2]")) + "\n", "")
+    updated, removed = views.sync_commitments(root)
+    assert removed == [note(root, "M1-C2")] and not note(root, "M1-C2").exists()
+    assert updated == []
+
+
+def test_owner_task_and_plazo_follow_the_minuta(root):
+    set_front(note(root, "M1-C1"), estado="cumplido", cerrado="2026-10-01")
+    path = note(root, "M1-C1")
+    path.write_text(path.read_text() + "- 2026-10-01 · M2 · Ya cotizó\n")
+    edit_minuta(root, "· Doña Rosa · Cotizar la pintura del salón · plazo: antes del 15",
+                "· Marta Solís · Cotizar pintura y brochas · plazo: el lunes")
+
+    updated, removed = views.sync_commitments(root)
+
+    assert updated == [path] and removed == []
+    text = path.read_text()
+    front = yaml.safe_load(text.split("---\n")[1])
+    assert (front["responsables"], front["plazo"], front["estado"], str(front["cerrado"])) == \
+        (["Marta Solís"], "el lunes", "cumplido", "2026-10-01")
+    assert "# M1-C1 · Cotizar pintura y brochas\n" in text
+    assert "**Responsable:** Marta Solís · **Plazo:** el lunes · **Estado:** cumplido\n" in text
+    assert text.endswith("- 2026-10-01 · M2 · Ya cotizó\n")  # follow-ups kept
+
+
+def test_unchanged_notes_keep_their_formatting(root):
+    path = note(root, "M1-C1")
+    obsidian = path.read_text().replace("responsables:\n- Doña Rosa", "responsables:\n  - Doña Rosa")
+    path.write_text(obsidian)
+    views.sync_commitments(root)
+    assert path.read_text() == obsidian  # same values: Obsidian's indentation stays
+
+
+def test_estado_line_follows_the_frontmatter(root):
+    set_front(note(root, "M1-C4"), estado="cancelado")
+    views.sync_commitments(root)
+    assert "**Estado:** cancelado" in note(root, "M1-C4").read_text()
+
+
+def test_sync_skips_busy_files_and_unnumbered_minutas(root):
+    edit_minuta(root, "· Doña Rosa · Cotizar", "· Otra Persona · Cotizar")
+    assert views.sync_commitments(root, {minuta_path(root)}) == ([], [])
+    assert views.sync_commitments(root, {note(root, "M1-C1")}) == ([], [])
+    text = minuta_path(root).read_text()
+    minuta_path(root).write_text(text.replace("numero: 1\n", ""))
+    assert views.sync_commitments(root) == ([], [])
+
+
+def test_update_syncs_notes_and_reports_removals(root):
+    edit_minuta(root, next(l for l in minuta_path(root).read_text().splitlines()
+                           if l.startswith("- **[M1-C2]")) + "\n", "")
+    edit_minuta(root, "plazo: antes del 15", "plazo: el viernes")
+    result = vault.update(root)
+    assert result.removed == [note(root, "M1-C2")]
+    assert note(root, "M1-C2") in result.changed and note(root, "M1-C1") in result.changed
+    assert "M1-C2" not in (root / "Compromisos/README.md").read_text()
+
+
+
+def test_check_cerrado_must_be_a_date(root):
+    set_front(note(root, "M1-C1"), estado="cumplido", cerrado="fueron enviadas")
+    set_front(note(root, "M1-C2"), estado="cumplido", cerrado="2026-10-01")
+    found = dict(messages(root))
+    assert warning_of(found, "Compromisos/2026/M1-C1.md",
+                      "`cerrado: fueron enviadas` debe ser una fecha AAAA-MM-DD; "
+                      "el detalle va en «Seguimiento»") is False
+    assert not any(m.startswith("Compromisos/2026/M1-C2.md") for m in found)
+
+
+
+@pytest.mark.parametrize("name, key", [("la Asociación de Desarrollo", "asociación de desarrollo"),
+                                       ("El desarrollador", "desarrollador"),
+                                       ("Laura Mora", "laura mora"), ("los vecinos", "vecinos")])
+def test_name_key_ignores_a_leading_article(name, key):
+    assert views.name_key(name) == key
+
+
+def test_an_article_doesnt_make_a_name_unknown(root):
+    (root / "Externos.md").write_text(OUTSIDERS + "| Asociación de Desarrollo | institución | |\n")
+    set_front(note(root, "M1-C2"), responsables=["la Asociación de Desarrollo"])
+    assert not any("Asociación" in m for m, _ in messages(root))
+    views.build(root)
+    assert "### [la Asociación de Desarrollo](../Personas/AsociacionDeDesarrollo.md)" in \
+        (root / "Compromisos/README.md").read_text()
+    assert "- [M1-C2]" in (root / "Personas/AsociacionDeDesarrollo.md").read_text()

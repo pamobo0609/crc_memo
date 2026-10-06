@@ -75,17 +75,21 @@ pushes; humans correct the markdown; ASCII PascalCase file names; sequential IDs
   publish): `Minutas/README.md`, `Compromisos/README.md` (open by person, closed by year),
   `Personas/<Name>.md` (Obsidian `aliases`, contact, commitments, mentions). ✅
   `memo vault check` (file:line; ✗ errors, ⚠ warnings).
-- **4d** PDF for the WhatsApp group via Typst, derived from `Minuta.md`.
+- **4d** ✅ PDF for the WhatsApp group (`pdf.py`, `templates/minuta.typ`, `typst` 0.15):
+  derived from `MinutaBreve.md`, A5, 14 pt Libertinus Serif (bundled), recipients callout
+  highlighted, no timestamps/links; deterministic (bundled fonts only, no PDF date; any Typst
+  warning is an error). Written by `memo process` (local preview), `publish` and `vault update`;
+  gitignored in the vault. Option: a low-vision sans font (Atkinson Hyperlegible, OFL) would
+  mean shipping font files.
 - **Done when:** a processed memo is published to the private repo with working links,
   commitment notes and indexes, and its PDF reads well on a phone.
 
-## Phase 5 — History & search (under review)
-Obsidian covers most of the original plan: full-text search, backlinks per person, open
-commitments via task search. **Proposed:** drop SQLite + FTS5; keep only a simple `memo list`
-(read from `data/memos/`) and `memo show`. Revisit if Obsidian falls short.
-*(Original plan, kept for reference: SQLite `memos`/`items` tables + FTS5 with
-`unicode61 remove_diacritics 2`; `list`, `search`, `show`, `todos`.)*
-- **Done when:** decided after Phase 4 is in use.
+## Phase 5 — History & search ✅ resolved: Obsidian covers it
+Obsidian's search (full text, properties like `[estado:abierto]`, tags, aliases), the
+generated indexes (`Minutas/README.md`, `Compromisos/README.md`, `Personas/`) and git history
+cover what this phase planned. Dropped: SQLite + FTS5 and the `list` / `search` / `show` /
+`todos` commands. *(Original plan, for reference: SQLite `memos`/`items` tables + FTS5 with
+`unicode61 remove_diacritics 2`.)*
 
 ## Later (only if I want)
 - Semantic search (local embeddings, multilingual model e.g. `bge-m3`) — or an Obsidian plugin

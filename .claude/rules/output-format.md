@@ -79,3 +79,7 @@ Los minutos [mm:ss] indican dónde verificarlo en el audio.*
   Dates only, never ages ("hace 12 días" would change every day). Stale person pages
   (marked generated) are removed.
 - `memo vault check` (`views.check`): ✗ errors / ⚠ warnings as file:line.
+- `Minuta.pdf` (`pdf.py` + `templates/minuta.typ`): the breve converted to Typst in code (its
+  markdown grammar is fixed; Typst markdown packages would need the network), compiled with
+  bundled fonts only, `date: none`; any warning is an error (unknown fonts only warn). Large
+  text on A5 for phones; the recipients callout is a highlighted box. Gitignored in the vault.

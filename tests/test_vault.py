@@ -32,7 +32,9 @@ def repo(tmp_path):
     subprocess.run(["git", "init", "--quiet", "--bare", str(remote)], check=True)
     subprocess.run(["git", "clone", "--quiet", str(remote), str(path)], check=True,
                    capture_output=True)
-    git(path, "commit", "--quiet", "--allow-empty", "-m", "init")
+    (path / ".gitignore").write_text(vault.GITIGNORE)  # like a real vault: PDFs aren't tracked
+    git(path, "add", ".gitignore")
+    git(path, "commit", "--quiet", "-m", "init")
     git(path, "push", "--quiet", "-u", "origin", "HEAD")
     return path
 
@@ -514,10 +516,23 @@ def test_apply_names_stops_on_a_cycle():
     assert text in {"a", "b"} and sum(changes.values()) == 10
 
 
-def test_update_without_renames_says_what_it_rebuilt(repo, tmp_path):
+def test_update_after_a_status_change_says_which_note(repo, tmp_path):
     vault.publish(make_memo(tmp_path), repo)
     note = repo / "Compromisos/2026/M1-C1.md"
     note.write_text(note.read_text().replace("estado: abierto", "estado: cumplido"))
     git(repo, "commit", "--quiet", "-am", "M1-C1 cumplido")
     assert vault.update(repo).committed
-    assert git(repo, "log", "-1", "--format=%s") == "Actualiza breves, índices y personas"
+    # The note's "Estado" line follows its new estado.
+    assert git(repo, "log", "-1", "--format=%s") == "compromisos actualizados: M1-C1"
+
+
+
+def test_update_message_names_synced_and_removed_notes(repo, tmp_path):
+    first = vault.publish(make_memo(tmp_path), repo)
+    text = first.minuta.read_text()
+    c2 = next(line for line in text.splitlines() if line.startswith("- **[M1-C2]"))
+    first.minuta.write_text(text.replace(c2 + "\n", "").replace("plazo: antes del 15", "plazo: el lunes"))
+    git(repo, "commit", "--quiet", "-am", "a mano")
+    vault.update(repo)
+    assert git(repo, "log", "-1", "--format=%s") == \
+        "compromisos actualizados: M1-C1; quita M1-C2"

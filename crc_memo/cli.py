@@ -1,4 +1,4 @@
-"""Command-line entry point. Commands are stubs until their phase lands."""
+"""Command-line entry point."""
 
 import shutil
 import time
@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from crc_memo import config, ingest, output, summarize, transcribe, vault, views
+from crc_memo import config, ingest, output, pdf, summarize, transcribe, vault, views
 from crc_memo.schemas import Prose
 
 app = typer.Typer(
@@ -21,10 +21,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
-
-
-def _todo(phase: str) -> None:
-    console.print(f"[yellow]Not implemented yet[/yellow] (coming in {phase}).")
 
 
 class Step(str, Enum):
@@ -39,7 +35,7 @@ STEP_FILES = {
     Step.extract: [summarize.EXTRACTIONS_NAME],
     Step.merge: [summarize.MINUTES_NAME],
     Step.write: [summarize.PROSE_NAME],
-    Step.render: [output.MINUTA_NAME, output.BREVE_NAME],
+    Step.render: [output.MINUTA_NAME, output.BREVE_NAME, pdf.PDF_NAME],
 }
 HISTORY_DIR = "history"
 
@@ -123,7 +119,8 @@ def process(
         _set_details(result.folder, sender, date_)
         _transcribe_step(result.folder, lang)
         _summarize(result.folder)
-    except (ingest.IngestError, transcribe.TranscribeError, summarize.SummarizeError) as e:
+    except (ingest.IngestError, transcribe.TranscribeError, summarize.SummarizeError,
+            pdf.PdfError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
 
@@ -259,7 +256,7 @@ def _write_step(folder: Path) -> None:
                       f"{folder / summarize.PROSE_NAME}")
         _llm_stats(stats)
 
-    for path in output.write(folder):
+    for path in [*output.write(folder), pdf.write(folder / output.MINUTA_NAME)]:
         console.print(f"[green]Minuta[/green] → {path}")
     prose = Prose.model_validate_json((folder / summarize.PROSE_NAME).read_text())
     if prose.meeting_recap is False:
@@ -273,17 +270,21 @@ def publish(
     force: bool = typer.Option(False, "--force", help="Replace a minuta edited in the vault."),
     push: bool = typer.Option(True, "--push/--no-push", help="Push the vault after committing."),
 ) -> None:
-    """Publish a memo's minuta to the vault ($CRC_MEMO_VAULT): number it (M12), write the
-    minuta, transcript and commitment notes, commit, and push."""
+    """Publish a memo's minuta to the vault and push.
+
+    Numbers it (M12) and writes the minuta, its short version and PDF, the transcript and one
+    note per commitment into $CRC_MEMO_VAULT, then commits and pushes.
+    """
     try:
         folder = ingest.find_memo(config.MEMOS_DIR, memo_id)
         if not summarize.is_written(folder):
             raise ingest.IngestError(f"{folder.name} has no minuta yet. Run: memo process")
         result = vault.publish(folder, vault.vault_dir(), force=force, push=push)
-    except (ingest.IngestError, vault.VaultError) as e:
+    except (ingest.IngestError, vault.VaultError, pdf.PdfError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
     console.print(f"[green]Published[/green] [bold]M{result.number}[/bold] → {result.minuta}")
+    console.print(f"  PDF for the group → {result.pdf}")
     if result.created:
         console.print(f"  {len(result.created)} new commitment notes in "
                       f"{vault.COMPROMISOS_DIR}/")
@@ -334,12 +335,14 @@ def vault_update(
     (never inside «quotes»), regenerate the short minutas, commit and push."""
     try:
         result = vault.update(vault.vault_dir(), push=push)
-    except vault.VaultError as e:
+    except (vault.VaultError, pdf.PdfError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
     for (found, correct), count in sorted(result.names.items()):
         console.print(f"  {found} → [bold]{correct}[/bold] ×{count}")
     console.print(f"[green]Updated[/green] {len(result.changed)} files")
+    for path in result.removed:
+        console.print(f"  removed {path.name}: it's no longer in its minuta")
     for path in result.skipped:
         console.print(f"[yellow]⚠ skipped {path.name}: it has uncommitted changes. Commit them, "
                       "then run this again.[/yellow]")
@@ -368,35 +371,6 @@ def vault_check() -> None:
         raise typer.Exit(1)
 
 
-@app.command("list")
-def list_memos() -> None:
-    """List processed memos: date, title, duration, open action items."""
-    _todo("Phase 5")
-
-
-@app.command()
-def search(query: str = typer.Argument(..., help="Full-text search query.")) -> None:
-    """Search across all transcripts and reports."""
-    _todo("Phase 5")
-
-
-@app.command()
-def show(
-    memo_id: str = typer.Argument(..., metavar="ID", help="Memo ID."),
-    exec_: bool = typer.Option(False, "--exec", help="Show the executive summary."),
-    full: bool = typer.Option(False, "--full", help="Show the full report."),
-    transcript: bool = typer.Option(False, "--transcript", help="Show the transcript."),
-) -> None:
-    """Show a processed memo."""
-    _todo("Phase 5")
-
-
-@app.command()
-def todos() -> None:
-    """List open action items across all memos."""
-    _todo("Phase 5")
-
-
 @app.command()
 def reprocess(
     memo_id: str = typer.Argument(..., metavar="ID", help="Memo ID (or a unique start of it)."),
@@ -407,8 +381,10 @@ def reprocess(
     sender: Optional[str] = SENDER,
     date_: Optional[str] = DATE,
 ) -> None:
-    """Rerun summarization on a transcribed memo, e.g. after a prompt or model change.
-    Previous outputs are kept in the memo's history/ folder."""
+    """Rerun summarization, e.g. after a prompt or model change.
+
+    Previous outputs are kept in the memo's history/ folder.
+    """
     try:
         folder = ingest.find_memo(config.MEMOS_DIR, memo_id)
         if not transcribe.is_transcribed(folder):

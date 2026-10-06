@@ -62,7 +62,7 @@ Claude-specific: **commit and push only when I ask.**
 | Transcription | `mlx-whisper` | `large-v3-turbo`. Use `faster-whisper` if not Apple Silicon |
 | LLM | Ollama (brew) via HTTP API or `ollama` Python package | Local models only |
 | Output | Obsidian vault (markdown) + PDF via `typst` (Python package) | Phase 4 |
-| Search / tracking | Obsidian (search, backlinks, task search) | SQLite + FTS5 dropped (proposed) |
+| Search / tracking | Obsidian (search, properties, aliases) + generated vault indexes | Phase 5 resolved: no SQLite |
 | Optional later | Multilingual local embedding model (e.g. `bge-m3`; Spanish memos) | Semantic search |
 
 ## Project layout
@@ -115,13 +115,13 @@ audio file → ffmpeg (16kHz mono wav) → whisper (timestamped transcript)
 - **Glossary:** `crc_memo/glossary/dcaa.json` (Costa Rican dictionary). Never inject it raw —
   see `.claude/rules/glossary.md` for its limits and how it's used.
 
-## CLI commands (target)
+## CLI commands
 ```
 memo process [PATH] [--sender NAME] [--date YYYY-MM-DD]   # no PATH → macOS file picker
-memo list                  # date, title, duration, # open action items
-memo show ID [--exec|--full|--transcript]
 memo reprocess ID [--from extract|merge|write|render] [--sender] [--date]
                            # rerun summarization; old outputs kept in <memo>/history/
+memo publish ID [--no-push] [--force]   # number it (M12) and publish to the vault
+memo vault init PATH | update [--no-push] | check
 ```
 
 ---
@@ -135,8 +135,8 @@ before starting it.**
   — 27:42 Spanish memo in 1:10 (≈24× real time), 0 loops, usable accuracy
 - [ ] Phase 3 — Summarization: meeting minutes (chunk → extract → merge → full → exec, `reprocess`)
 - [ ] Phase 3.5 — Glossary checkpoint (judge dcaa.json by its effect on summaries)
-- [ ] Phase 4 — Output: traceable vault (private GitHub repo: Minuta.md, IDs M12-C3, evidence, `memo publish`) + PDF — 4a, 4b done
-- [ ] Phase 5 — History & search: under review — Obsidian covers search/tracking; likely just `memo list`/`show`
+- [ ] Phase 4 — Output: traceable vault (private GitHub repo: Minuta.md, IDs M12-C3, evidence, `memo publish`, names, indexes, `vault check`) + PDF — 4a–4d built; done when the PDF reads well on a phone
+- [x] Phase 5 — History & search: resolved — Obsidian + generated indexes cover it (no SQLite)
 
 ## Context rules
 Topic details load on demand from `.claude/rules/` when matching files are read or edited:

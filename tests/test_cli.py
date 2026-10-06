@@ -51,7 +51,7 @@ def llm_calls(monkeypatch):
 def test_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ["process", "list", "search", "show", "todos", "reprocess"]:
+    for command in ["process", "reprocess", "publish", "vault"]:
         assert command in result.output
 
 
@@ -146,13 +146,10 @@ def test_process_rejects_missing_file(tmp_path):
     assert result.exit_code == 2  # typer's usage error
 
 
-@pytest.mark.parametrize(
-    "args", [["list"], ["search", "brete"], ["show", "abc"], ["todos"]]
-)
-def test_unimplemented_commands_say_so(args):
-    result = runner.invoke(app, args)
-    assert result.exit_code == 0
-    assert "Not implemented yet" in result.output
+@pytest.mark.parametrize("args", [["list"], ["search", "brete"], ["show", "abc"], ["todos"]])
+def test_phase_5_commands_are_gone(args):
+    # Obsidian's search and the vault's generated indexes cover them.
+    assert runner.invoke(app, args).exit_code == 2  # "No such command"
 
 
 def test_process_reports_llm_error(audio_files, monkeypatch):
@@ -238,8 +235,8 @@ def test_reprocess_reruns_from_extract_and_keeps_history(memo, llm_calls):
     assert len(llm_calls) == before + 1  # the empty extraction needs no merge/write calls
     (archive,) = (memo / "history").iterdir()
     assert sorted(p.name for p in archive.iterdir()) == [
-        "Minuta.md", "MinutaBreve.md", "extractions.json", "meta.json", "minutes.json",
-        "prose.json"]
+        "Minuta.md", "Minuta.pdf", "MinutaBreve.md", "extractions.json", "meta.json",
+        "minutes.json", "prose.json"]
 
 
 def test_reprocess_from_merge_keeps_earlier_steps(memo, llm_calls):
@@ -261,7 +258,8 @@ def test_sender_alone_only_rerenders(memo, llm_calls):
 
 
 def test_reprocess_without_outputs_archives_nothing(memo):
-    for name in ["extractions.json", "minutes.json", "prose.json", "Minuta.md", "MinutaBreve.md"]:
+    for name in ["extractions.json", "minutes.json", "prose.json", "Minuta.md", "MinutaBreve.md",
+                 "Minuta.pdf"]:
         (memo / name).unlink()
     result = runner.invoke(app, ["reprocess", memo.name])
     assert result.exit_code == 0
@@ -417,3 +415,10 @@ def test_vault_check_without_vault(monkeypatch):
     monkeypatch.delenv("CRC_MEMO_VAULT", raising=False)
     result = runner.invoke(app, ["vault", "check"])
     assert result.exit_code == 1 and "Set CRC_MEMO_VAULT" in result.output
+
+
+def test_vault_update_reports_removed_notes(vault_dir, monkeypatch):
+    monkeypatch.setattr(vault, "update", lambda path, push: vault.UpdateResult(
+        removed=[path / "Compromisos/2026/M1-C3.md"]))
+    output = " ".join(runner.invoke(app, ["vault", "update"]).output.split())
+    assert "removed M1-C3.md: it's no longer in its minuta" in output

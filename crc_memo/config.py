@@ -6,7 +6,6 @@ PROJECT_DIR = Path(__file__).parent.parent
 
 # Where memo keeps its own data (database + per-memo folders). Gitignored, never synced.
 DATA_DIR = PROJECT_DIR / "data"
-DB_PATH = DATA_DIR / "memo.db"
 MEMOS_DIR = DATA_DIR / "memos"
 
 # Models

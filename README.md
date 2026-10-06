@@ -6,24 +6,25 @@
 ![platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey)
 ![cost](https://img.shields.io/badge/cost-%240-success)
 
-**Turn long, rambling voice memos into something you can act on — entirely on your Mac,
-for $0, with first-class support for Costa Rican Spanish.**
+**Turn long, rambling voice memos into meeting minutes you can trace back to the audio —
+entirely on your Mac, for $0, with first-class support for Costa Rican Spanish.**
 
-Many people — especially older relatives and community members — report on meetings
-through long, wandering WhatsApp voice notes. `crc_memo` transcribes the audio locally and
-turns it into **meeting minutes**:
+Many people — especially older relatives and community spokespeople — report on meetings
+through long, wandering WhatsApp voice notes sent to a group. `crc_memo` transcribes the audio
+locally and turns it into a **minuta** (meeting minutes) that a person reviews before sharing:
 
-- **An executive summary** — one page: TL;DR, agreements, tasks (who / what / when), open
-  questions, the next meeting, and anything the speaker asks *you* to do.
-- **A full report** — organized by topic with timestamps, a task table, and a "tangents"
-  section that tells you what was safe to skip.
-- **Obsidian-ready notes** — every minuta lands in an Obsidian vault with properties, links
-  to people and task checkboxes, so you can search and track meetings over time.
-- **A PDF** of the short minuta to share back with the group.
+- **`Minuta.md`** — the full minuta: summary, topics, agreements, commitments (who / what / by
+  when), open questions, next meeting. Every item has a code you can say out loud (`M12-C3`)
+  and the exact words with the minute they were said: `[03:45] «…»`.
+- **`MinutaBreve.md` + `Minuta.pdf`** — the short version, as a large-print PDF to send back to
+  the WhatsApp group. It highlights anything the speaker asks the group to do.
+- **A vault** — a private git repo of Spanish markdown, readable on GitHub and in
+  [Obsidian](https://obsidian.md): one note per commitment (status + follow-ups), a page per
+  person, indexes of open commitments, and a git history of every correction.
 
 > [!NOTE]
-> **Work in progress.** Ingest and transcription work today; summarization is next.
-> See [Status](#status).
+> The tool drafts, a person reviews. Local models make mistakes (a wrong owner, an invented
+> open question); every claim carries its quote and timestamp so they're quick to spot and fix.
 
 ---
 
@@ -31,11 +32,12 @@ turns it into **meeting minutes**:
 
 | | |
 |---|---|
-| 🔒 **Private by design** | Audio, transcripts and reports never leave your machine. No accounts, no API keys, no telemetry. |
+| 🔒 **Private by design** | Audio and working files never leave your machine. Only the minutas you publish go to *your* vault repo — never the audio. No accounts, no API keys, no telemetry. |
 | 💸 **Free to run** | Open-source models (Whisper + a local LLM via Ollama). Zero cost is a [project rule](CONTRIBUTING.md#rules), not a tier. |
-| 🇨🇷 **Speaks tico** | Ships a 12,909-entry Costa Rican Spanish dictionary so *brete*, *chunche* and *jalarse una torta* aren't lost in translation. |
-| 🧩 **Built for long memos** | Small local models summarize poorly in one shot, so the pipeline chunks → extracts structured data → merges, instead of "summarize this transcript". |
-| ⌨️ **CLI only** | One command. The only UI is the native macOS file picker. |
+| 🔍 **Traceable** | Human IDs (`M12-C3`), quotes checked against the transcript in code, provenance (which audio, models, prompts and code version), git history of every fix. |
+| 🇨🇷 **Speaks tico** | Money slang normalized (*cinco rojos* → ₡5.000), a 12,909-entry Costa Rican Spanish dictionary, Spanish output. |
+| 🧩 **Built for long memos** | Small local models summarize poorly in one shot, so the pipeline chunks → extracts structured data → merges → checks → writes, one small step at a time. |
+| ⌨️ **CLI only** | A handful of commands. The only UI is the native macOS file picker. |
 
 ## How it works
 
@@ -43,31 +45,29 @@ turns it into **meeting minutes**:
 flowchart LR
     A[🎙️ .ogg / .opus / .m4a] --> B[ffmpeg<br/>16 kHz mono WAV]
     B --> C[Whisper<br/>timestamped transcript]
-    C --> D[Chunk<br/>~5 min]
-    D --> E[Extract per chunk<br/>JSON via local LLM]
-    E --> F[Merge + dedupe]
-    F --> G[Full report]
-    G --> H[Executive summary]
-    H --> I[🗂️ Obsidian notes + 📄 PDF]
+    C --> D[Extract per ~5-min chunk<br/>JSON + quotes]
+    D --> E[Merge + dedupe<br/>owner check, quotes verified]
+    E --> F[Write prose<br/>per topic + summary]
+    F --> G[📝 Minuta.md]
+    G --> H[memo publish]
+    H --> I[🗂️ Vault: minuta, commitments,<br/>people, indexes]
+    H --> J[📄 PDF for the group]
 ```
 
-The executive summary is written **from the full report, not the raw transcript** — each step
-is small enough for a local model to do well. Memos are deduplicated by content hash, so
-processing the same file twice is instant.
+The summary is written from the per-topic notes, not the raw transcript, and the LLM only
+writes prose — IDs, labels, dates, money and layout come from code, so they're consistent.
 
 ## Status
 
 | Phase | What | |
 |---|---|---|
-| 0 | Setup, CLI skeleton | ✅ |
-| 1 | Ingest: file picker, ffmpeg → WAV, dedupe by hash | ✅ |
-| 2 | Transcription (mlx-whisper `large-v3-turbo`): a 27-min Spanish memo in ~1 min | ✅ |
-| 3 | Summarization into meeting minutes (chunk → extract → merge → reports) | ⏳ in progress |
-| 3.5 | Glossary checkpoint, judged by its effect on summaries | ⬜ |
-| 4 | Output: Obsidian vault (properties, links, tasks) + PDF for the group | ⬜ |
-| 5 | History & search — under review: Obsidian may cover it | ⬜ |
+| 0–2 | Setup, ingest (picker, ffmpeg, dedupe by hash), transcription (a 27-min memo in ~1 min) | ✅ |
+| 3 | Minutas: extract → merge → write, `reprocess`, `--sender`/`--date` | ✅ tuning continues on more real memos |
+| 3.5 | Glossary checkpoint, judged by its effect on minutas | ⬜ |
+| 4 | Vault (publish, names, indexes, check) + PDF for the group | ✅ |
+| 5 | History & search | ✅ resolved: Obsidian + the vault's indexes cover it |
 
-Full details and "done when" criteria: [docs/ROADMAP.md](docs/ROADMAP.md).
+Details and "done when" criteria: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Quick start
 
@@ -79,16 +79,18 @@ Full details and "done when" criteria: [docs/ROADMAP.md](docs/ROADMAP.md).
 brew install ffmpeg uv ollama
 brew services start ollama
 ollama pull qwen3:14b            # default LLM; any Ollama model works (see Configuration)
+brew install --cask obsidian     # optional, free: to read and search your vault
 
 # 2. Project
 git clone https://github.com/pamobo0609/crc_memo.git
 cd crc_memo
 uv sync                          # creates .venv with Python 3.12 + dependencies
 
-# 3. Run
-uv run memo process ~/Downloads/nota-de-voz.ogg
-uv run memo process              # no path → opens the macOS file picker
+# 3. Your first minuta
+uv run memo process              # pick an audio file; ~15 min per 30 min of audio
 ```
+
+All commands below run from the `crc_memo` folder as `uv run memo …`.
 
 <details>
 <summary>Why these tools?</summary>
@@ -99,113 +101,241 @@ uv run memo process              # no path → opens the macOS file picker
   Whisper models expect.
 - **[Ollama](https://ollama.com/)** — runs open LLMs locally behind a simple HTTP API.
 - **[mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)** — Whisper on
-  Apple Silicon's GPU via MLX (arrives in Phase 2).
+  Apple Silicon's GPU via MLX.
+- **[Typst](https://typst.app/)** (Python package) — builds the PDF; no LaTeX or browser.
 
 </details>
 
-## Commands
+## Tutorials
 
-| Command | Does | |
+### 1. Turn an audio into a minuta — `memo process`
+
+```sh
+uv run memo process "WhatsApp Audio 2026-01-15 at 10.00.00.opus" --sender "Rosa Pérez"
+uv run memo process                       # no path: opens the macOS file picker
+```
+
+1. **Ingest:** the file is copied into `data/memos/<id>/` (the id is the start of its SHA-256)
+   and converted to WAV. The same file twice is recognized and skipped.
+2. **Transcribe** with Whisper (about a minute for half an hour of audio; the first run
+   downloads the model, ~1.6 GB). It warns about spots where Whisper may have looped.
+3. **Extract, merge, write** with the local LLM — the slow part, about 15 minutes for 30
+   minutes of audio. Each step prints how many tokens it read and wrote.
+4. **Result:** `Minuta.md`, `MinutaBreve.md` and `Minuta.pdf` in the memo's folder, to preview
+   before publishing.
+
+Options:
+- `--sender "Name"` — who recorded the audio; shown in the minuta, and owns the commitments
+  the speaker makes ("se los mando yo").
+- `--date YYYY-MM-DD` — the audio's date. Not needed for WhatsApp exports: it's read from file
+  names like `WhatsApp Audio 2026-01-15 at …` or `PTT-20260115-WA0003`.
+- `--lang es|en` — skip language detection (Whisper only listens to the first 30 seconds).
+
+If it stops halfway (Ollama not running, Ctrl-C), run the same command again: it resumes
+where it stopped. If the audio isn't a meeting recap (a complaint, an announcement) it says
+so, and the minuta leaves out the meeting details instead of inventing them.
+
+### 2. Redo part of it — `memo reprocess`
+
+After changing a prompt, the model or a setting:
+
+```sh
+uv run memo reprocess a1b2                  # rerun everything after transcription
+uv run memo reprocess a1b2 --from write     # only rewrite the prose
+uv run memo reprocess a1b2 --sender "Rosa Pérez"   # just fix the header: no LLM calls
+```
+
+| `--from` | Reruns | LLM time |
 |---|---|---|
-| `memo process [PATH] [--lang es] [--sender NAME] [--date YYYY-MM-DD]` | Ingest, transcribe and write the minuta (`Minuta.md`). No path → file picker. Resumes where it stopped. The date is read from WhatsApp file names. | ✅ |
-| `memo list` | Processed memos: date, title, duration, open action items | planned |
-| `memo show ID [--exec\|--full\|--transcript]` | Print a memo's summary, report or transcript | planned |
-| `memo reprocess ID [--from extract\|merge\|write\|render]` | Re-run summarization (after changing a prompt or model). Previous outputs are kept in the memo's `history/`. `--sender`/`--date` alone only re-render. | ✅ |
-| `memo vault init PATH` | Create an empty vault (Spanish README, templates, git repo) — see below | ✅ |
-| `memo publish ID [--no-push] [--force]` | Number the minuta (M12), write it + transcript + one note per commitment into your vault, commit and push | ✅ |
-| `memo vault update [--no-push]` | Apply the name tables everywhere (never inside «quotes»), rebuild the short minutas, indexes and person pages, commit and push | ✅ |
-| `memo vault check` | Check what people edit (minutas, commitment notes, name tables); problems as file:line | ✅ |
+| `extract` (default) | extract → merge → write → render | all of it |
+| `merge` | merge → write → render | a few minutes |
+| `write` | the prose (topics, summary) → render | a few minutes |
+| `render` | `Minuta.md`, breve and PDF from what's there | none |
+
+The memo id can be shortened to any unique start (`a1b2`). The previous outputs are copied to
+the memo's `history/<date time>/` first, so you can compare before and after.
+
+### 3. Create your vault — `memo vault init`
+
+The vault is where published minutas live: a folder of Spanish markdown that is also a git
+repo. **It is never part of this repo** (this repo is public; `crc_memo` refuses a vault inside
+its own folder).
+
+```sh
+uv run memo vault init ~/Documents/MinutasVault
+# On GitHub, create a PRIVATE repo (no README), then:
+cd ~/Documents/MinutasVault
+git remote add origin https://github.com/<you>/<your-vault>.git
+git add -A && git commit -m "Inicio" && git push -u origin main
+echo 'export CRC_MEMO_VAULT=~/Documents/MinutasVault' >> ~/.zshrc   # then open a new terminal
+```
+
+`init` creates a Spanish README (with a how-to for whoever maintains the vault), the name
+tables, `Configuracion.md` and Obsidian settings for links that also work on GitHub. In
+Obsidian, use *Open folder as vault*. Under *Settings → Files and links*, check that
+"Use [[Wikilinks]]" is off and "New link format" is "Relative path to file".
+
+### 4. Publish a minuta — `memo publish`
+
+```sh
+uv run memo publish a1b2
+```
+
+1. Gives the minuta the next number (`M12`; numbers are never reused) and its items codes
+   (`M12-A1` agreements, `M12-C3` commitments, `M12-P1` open questions, `M12-O1` observations).
+2. Writes `Minutas/<year>/M12-<date>/` — `Minuta.md`, `MinutaBreve.md`, `Transcripcion.md` and
+   `Minuta.pdf` — plus one note per commitment in `Compromisos/<year>/`.
+3. Rebuilds the indexes and person pages, commits **only the files it wrote**, and pushes.
+
+`--no-push` keeps the commit local. Publishing the same audio again keeps its number, never
+touches commitment notes (they hold follow-ups) and refuses to overwrite a minuta someone
+edited — `--force` overrides that, regenerating the minuta and **discarding hand corrections**
+to it, so it's only for redoing a minuta from scratch.
+
+### 5. Fix a name everywhere — `memo vault update`
+
+Whisper and the LLM write names however they heard them ("doña Rosita", "Rosa Peres"). Fix
+them once:
+
+1. In the vault, list each person with the forms they appear as («También dicen», separated
+   by `;`): owners in `Propietarios.md` (one row per person, with lote, phone, email) and
+   everyone else in `Externos.md`. For example
+   `| Rosa Pérez | L-14 | … | | doña Rosa; Rosita | |`.
+2. Commit those files (Obsidian's free Git plugin, or `git` in the terminal).
+3. Run:
+   ```sh
+   uv run memo vault update
+   ```
+   It prints each fix (`Rosita → Rosa Pérez ×3`), applies it to every minuta, commitment note
+   and short minuta — **never inside «quotes»**, which stay as said — rebuilds the PDFs, indexes
+   and person pages, commits and pushes.
+
+Files with uncommitted edits are skipped (and listed), so it never commits someone's work in
+progress. To call the audio's recipients by the group's name instead of "Quienes reciben el
+audio", set `destinatarios` in the vault's `Configuracion.md` and run `update`.
+
+### 6. Correct a minuta and follow up commitments
+
+Corrections are made by hand in the vault (Obsidian or any editor), then saved with git:
+
+- **A wrong owner, a wrong sentence, an item that shouldn't be there:** edit the minuta's
+  `Minuta.md`. Say why in the commit message, citing the minute:
+  `M12-C3: responsable es Rosa Pérez («yo lo hago», 07:01)`. The minuta is the source of what
+  was said: on `update`, a commitment you deleted loses its note (git keeps its history) and a
+  changed owner, task or plazo is copied into its note.
+- **A commitment's progress:** in `Compromisos/<year>/M12-C3.md`, add lines under
+  «Seguimiento»; when it's done, set `estado: cumplido` (or `cancelado`) and `cerrado: <date>`.
+
+Then run `uv run memo vault update`: the commitment notes, the short minuta, the PDF,
+`Compromisos/README.md` (open commitments by person) and the person pages follow your changes.
+A note's `estado`, `cerrado` and «Seguimiento» are never overwritten.
+
+### 7. Check the vault — `memo vault check`
+
+```sh
+uv run memo vault check
+```
+
+Checks what people edit and lists problems as `file:line`: ✗ for errors (an `estado` that
+isn't abierto/cumplido/cancelado, an invalid email or phone, a commitment without its note, a
+duplicate number) and ⚠ for things worth a look (an owner not in the name tables, a closed
+commitment without a date). It exits with an error code only for ✗.
+
+### 8. Share with the group
+
+Send `Minuta.pdf` from the minuta's folder in the vault (WhatsApp Desktop, or AirDrop it to
+your phone). It's the short minuta in large print: the request to the group highlighted, no
+timestamps or links. PDFs aren't committed — they're rebuilt from `Minuta.md` whenever you run
+`publish` or `vault update`, so run `update` after correcting and before sending.
+
+## Command reference
+
+| Command | Does |
+|---|---|
+| `memo process [PATH] [--sender NAME] [--date YYYY-MM-DD] [--lang es]` | Audio → `Minuta.md`, breve and PDF in `data/memos/<id>/`. Resumes where it stopped. |
+| `memo reprocess ID [--from extract\|merge\|write\|render] [--sender] [--date]` | Rerun from a step; previous outputs kept in `history/`. |
+| `memo vault init PATH` | Create an empty vault (Spanish README, name tables, settings, git). |
+| `memo publish ID [--no-push] [--force]` | Number it (M12) and write it into the vault; commit and push. |
+| `memo vault update [--no-push]` | Apply the name tables everywhere; rebuild breves, PDFs, indexes and person pages; commit and push. |
+| `memo vault check` | List problems in what people edit, as `file:line`. |
 
 ## Where your data lives
 
 ```
-data/                        ← gitignored, never synced by this tool
-└── memos/<id>/              ← <id> = first 12 chars of the file's SHA-256
-    ├── original.ogg         ← untouched copy of what you processed
-    ├── audio.wav            ← 16 kHz mono, what Whisper reads
-    ├── transcript.txt       ← one [MM:SS] line per segment
-    ├── segments.json        ← exact segment timestamps
-    └── meta.json            ← original filename, language, transcription speed + loop warnings
+data/                              ← in this folder, gitignored: never leaves your Mac
+└── memos/<id>/                    ← <id> = first 12 chars of the audio's SHA-256
+    ├── original.opus, audio.wav   ← the audio (never published)
+    ├── transcript.txt, segments.json
+    ├── extractions.json, minutes.json, prose.json   ← each pipeline step
+    ├── Minuta.md, MinutaBreve.md, Minuta.pdf        ← local preview
+    ├── meta.json                  ← file name, sender, date, speeds, LLM stats, publish record
+    └── history/                   ← previous outputs, one folder per reprocess
+
+$CRC_MEMO_VAULT/                   ← your vault: a private repo you choose (Spanish)
+├── README.md                      ← how to maintain it, in Spanish
+├── Configuracion.md               ← e.g. destinatarios: the group's name
+├── Propietarios.md, Externos.md   ← who's who + how the audios call them
+├── Minutas/
+│   ├── README.md                  ← generated index of minutas
+│   └── 2026/M12-2026-01-15/
+│       ├── Minuta.md              ← each item: code + [mm:ss] «quote»; ⚠ = quote not found
+│       ├── MinutaBreve.md         ← generated from Minuta.md
+│       ├── Minuta.pdf             ← generated, gitignored
+│       └── Transcripcion.md       ← the evidence
+├── Compromisos/
+│   ├── README.md                  ← generated: open by person, closed by year
+│   └── 2026/M12-C3.md             ← one note per commitment: estado + seguimiento
+└── Personas/RosaPerez.md          ← generated: contact, commitments, mentions (Obsidian aliases)
 ```
 
-## Your vault (bring your own)
-
-Published minutas go to **your own vault**: a folder of plain Spanish markdown that is also a
-git repo. Open it with [Obsidian](https://obsidian.md) (free) for its search — properties like
-`[estado:abierto]`, tags — and it still reads well on GitHub. `memo vault init` sets
-Obsidian to markdown links with relative paths, so links work in both. **This repo never contains a vault or any minuta**: it's public,
-so `crc_memo` refuses a vault inside its own folder. Where your vault lives and who can see it
-is up to you — a **private** GitHub repo (free) is what this project was built around.
-
-```sh
-uv run memo vault init ~/Documents/MinutasVault      # folders, README, templates, git init
-# create a PRIVATE repo on GitHub, then:
-git -C ~/Documents/MinutasVault remote add origin <url>
-export CRC_MEMO_VAULT=~/Documents/MinutasVault       # e.g. in ~/.zshrc
-uv run memo publish <memo id>                        # writes, commits and pushes
-```
-
-```
-MinutasVault/
-├── Propietarios.md                 ← one row per owner: lote, phone, email, name variants
-├── Externos.md                     ← everyone else named in the audios (engineers, institutions…)
-├── Minutas/2026/M12-2026-09-27/
-│   ├── Minuta.md                   ← every item: code (M12-C3) + [mm:ss] «exact quote»
-│   └── Transcripcion.md            ← the evidence every [mm:ss] points to
-├── Compromisos/2026/M12-C3.md      ← one note per commitment: estado + seguimiento
-├── Minutas/…/MinutaBreve.md         ← the short minuta for the group, derived from Minuta.md
-├── Minutas/README.md, Compromisos/README.md   ← generated indexes (open commitments by person)
-└── Personas/RosaPerez.md           ← generated page per person: contact, commitments, mentions
-```
-
-The audio never goes to the vault (only its SHA-256, so anyone can check which recording a
-minuta came from). Correct a minuta by editing its `Minuta.md`; git history shows who changed
-what. Names are fixed once: list how each person appears ("También dicen") in
-`Propietarios.md` / `Externos.md` and run `memo vault update` — every minuta and commitment
-gets the right name, while «quotes» stay exactly as said. Republishing keeps the number and refuses to overwrite a hand-edited minuta without
-`--force`.
+The audio never goes to the vault — only its SHA-256, so anyone can check which recording a
+minuta came from.
 
 ## Costa Rican Spanish
 
-Most memos this tool is built for are in Costa Rican Spanish, so language support is
-designed in from the start rather than bolted on (it lands across Phases 2–4):
+Most memos this tool is built for are in Costa Rican Spanish, so language support is designed
+in rather than bolted on:
 
-- **Reports follow the memo's language** *(planned)* — a Spanish memo gets a Spanish
-  summary, with consistent Spanish headings and dates (`5 oct 2026`).
+- **Output follows the memo's language**, with fixed Spanish/English labels and dates
+  (`5 oct 2026`) from code. The vault is always Spanish.
+- **Money slang is normalized in code**: *cinco rojos* → ₡5.000, *medio palo* → ₡500.000.
+  Quotes stay as said.
 - **Glossary** — [`crc_memo/glossary/dcaa.json`](crc_memo/glossary/dcaa.json) is an OCR import
   of Arturo Agüero Chaves' *Diccionario de costarriqueñismos*: 12,909 entries and 2,440
-  phrases with meanings, usage tags (colloquial, vulgar, dated…) and variants. *(Planned:)*
-  matching entries are given to the LLM per chunk, so *"me jalé una torta con el brete"*
-  is summarized as *"cometí un error en el trabajo"* instead of being misread.
-- **Slang normalization in reports** *(planned)* — *dos rojos* → ₡2.000; *ahorita* → no
-  invented due date.
+  phrases with meanings, usage tags and variants. *(Planned, Phase 3.5:)* matching entries
+  given to the LLM per chunk, judged by whether they actually improve minutas.
 
-The dictionary reflects older and rural usage, so modern slang (*mae, birra, chante*) will get
-a small hand-curated list. Its known limits are documented in
+The dictionary reflects older and rural usage — a good fit for elderly speakers; modern slang
+(*mae, birra, chante*) will need a small hand-curated list. Its known limits are documented in
 [`.claude/rules/glossary.md`](.claude/rules/glossary.md).
 
 ## Configuration
 
-Settings live in [`crc_memo/config.py`](crc_memo/config.py):
+Settings live in [`crc_memo/config.py`](crc_memo/config.py); the vault's location comes from
+the `CRC_MEMO_VAULT` environment variable (never from code — this repo is public).
 
 | Setting | Default | Notes |
 |---|---|---|
 | `LLM_MODEL` | `qwen3:14b` | Any model you've pulled with Ollama |
 | `LLM_NUM_CTX` | `16384` | Ollama's default context is small and **silently truncates** input |
 | `WHISPER_MODEL` | `mlx-community/whisper-large-v3-turbo` | |
-| `OUTPUT_DIR` | `~/Google Drive/Memos` | Where reports are written — becomes the Obsidian vault path in Phase 4 |
-| `DATA_DIR` | `./data` | Local history, audio and transcripts |
+| `WHISPER_INITIAL_PROMPT` | a sentence with *ICE*, *monofásico*, *trifásico* | Words Whisper tends to mishear in your memos (public terms only). Set your own, or `None` |
+| `CHUNK_SECONDS` | `300` | Transcript chunk sent to the LLM at a time |
+| `LINE_SECONDS` | `10` | Whisper segments are packed into lines of about this long |
+| `MIN_TOPIC_SECONDS`, `MIN_TANGENT_SECONDS` | `60`, `15` | Shorter topics are folded; shorter digressions aren't listed |
+| `DATA_DIR` | `./data` | Audio, transcripts and working files (gitignored) |
 
 ## Development
 
 ```sh
 uv run pytest        # runs the suite; fails below 100% line + branch coverage
+uv run pytest -m integration --no-cov    # opt-in: real Whisper on synthetic audio (macOS)
 ```
 
-- Tests are **fast and offline**: they convert real generated audio with ffmpeg, but never
-  touch your `data/`, the network, Whisper or Ollama (those are faked).
-- **CI** runs on `ubuntu-latest` via GitHub Actions — only when code changes; docs-only
-  commits skip it.
+- Tests are **fast and offline**: they convert real generated audio with ffmpeg and use real
+  git and Typst, but never touch your `data/`, your vault, the network, Whisper or Ollama
+  (those are faked). Test data is made up.
+- **CI** runs on `ubuntu-latest` via GitHub Actions — only when code changes.
 - Read **[CONTRIBUTING.md](CONTRIBUTING.md)** before contributing: zero cost unless hard
   blocked, real memo data never enters the repo, every change ships with tests.
 
@@ -217,8 +347,15 @@ crc_memo/
 ├── crc_memo/            # the app
 │   ├── cli.py           # Typer commands
 │   ├── config.py        # paths, models, settings
-│   ├── ingest.py        # picker, hashing, ffmpeg
-│   ├── prompts/         # LLM prompts as .md files (Phase 3)
+│   ├── ingest.py        # picker, hashing, ffmpeg, meta.json
+│   ├── transcribe.py    # Whisper, loop warnings
+│   ├── summarize.py     # chunk → extract → merge (+ owner check, quotes) → write
+│   ├── schemas.py       # LLM output shapes and the minutes.json contract
+│   ├── output.py        # Minuta.md and MinutaBreve.md (es/en labels)
+│   ├── pdf.py           # the group's PDF (Typst) + templates/minuta.typ
+│   ├── vault.py         # publish, names, update, git
+│   ├── views.py         # vault indexes, person pages, check
+│   ├── prompts/         # LLM prompts as .md files
 │   └── glossary/        # Costa Rican Spanish dictionary
 ├── tests/
 ├── scripts/             # one-off tools (dictionary importer)
@@ -232,8 +369,8 @@ crc_memo/
 ## Acknowledgements
 
 - **Arturo Agüero Chaves** — *Diccionario de costarriqueñismos*, the source of the glossary.
-- **OpenAI Whisper**, **Apple MLX**, **Ollama**, **Qwen** — the open models and runtimes this
-  stands on.
+- **OpenAI Whisper**, **Apple MLX**, **Ollama**, **Qwen**, **Typst** — the open models and
+  tools this stands on.
 - **[Scriberr](https://github.com/rishikanthc/Scriberr)** and
   **[Meetily](https://github.com/Zackriya-Solutions/meetily)** — prior art in local
   Whisper + LLM summarization.

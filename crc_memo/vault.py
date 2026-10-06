@@ -24,7 +24,7 @@ from pathlib import Path
 
 import yaml
 
-from crc_memo import config, ingest, output, summarize
+from crc_memo import config, ingest, output, pdf, summarize
 from crc_memo.schemas import Minutes, MinutesCommitment, Prose
 
 VAULT_ENV = "CRC_MEMO_VAULT"
@@ -66,6 +66,7 @@ class PublishResult:
     committed: bool = False
     pushed: bool = False
     warning: str | None = None
+    pdf: Path | None = None  # for the WhatsApp group; gitignored (rebuilt from Minuta.md)
 
 
 # --- names and paths ------------------------------------------------------------------
@@ -220,6 +221,7 @@ def publish(folder: Path, vault: Path, force: bool = False, push: bool = True) -
                         existing[0].parent / output.BREVE_NAME]:
                 old.unlink(missing_ok=True)
                 written.append(old)
+            (existing[0].parent / pdf.PDF_NAME).unlink(missing_ok=True)
             if not any(existing[0].parent.iterdir()):
                 existing[0].parent.rmdir()
 
@@ -243,7 +245,7 @@ def publish(folder: Path, vault: Path, force: bool = False, push: bool = True) -
 
     from crc_memo import views  # views reads the vault through this module
     written += views.build(vault, uncommitted(vault))[0]
-    result = PublishResult(number, target, created)
+    result = PublishResult(number, target, created, pdf=pdf.write(target))
     commit_and_push(vault, f"M{number} — minuta del {memo_date}", [*written, *created], push,
                     result)
     return result
@@ -262,6 +264,9 @@ de audios de WhatsApp y revisadas por personas. **Repositorio privado.**
   ⚠ = la cita no se encontró en la transcripción: revisar.
 - `Minutas/<año>/M12-<fecha>/MinutaBreve.md`: la versión corta para el grupo. Se genera desde
   `Minuta.md`: **no la edite**, corrija la completa.
+- `Minutas/<año>/M12-<fecha>/Minuta.pdf`: esa versión corta en PDF, letra grande, para mandar
+  al grupo de WhatsApp. Se rehace sola desde `Minuta.md` y no se guarda en git: solo está en la
+  computadora donde se corre `memo`.
 - `Minutas/<año>/M12-<fecha>/Transcripcion.md`: lo que se dijo, minuto a minuto. Es la
   evidencia: **no la edite**.
 - `Compromisos/<año>/M12-C3.md`: una nota por compromiso, con su estado y su seguimiento.
@@ -291,15 +296,19 @@ git add -A && git commit -m "qué cambió y por qué" && git push   # dentro de 
    hace commit y push.
 3. En Obsidian, revise la minuta: primero los ⚠ y los responsables de cada compromiso.
    Corrija lo que haga falta con el paso 2.
+4. Mande al grupo `Minuta.pdf` (está en la carpeta de la minuta). Si corrigió algo, corra
+   antes `memo vault update`: el PDF sale con las correcciones.
 
 ### 2. Corregir una minuta ya publicada
-1. Abra su `Minuta.md` y corrija el texto (no toque las citas «…»: son lo que se dijo).
-2. Si cambió el responsable de un compromiso, cámbielo también en su nota
-   (`Compromisos/<año>/M12-C3.md`: en `responsables` y en la línea «Responsable»).
-3. Guarde con git. En el mensaje diga qué y por qué, citando el minuto:
+1. Abra su `Minuta.md` y corrija lo que haga falta. Puede borrar puntos que sobran (un
+   compromiso o un pendiente que no lo es) o cambiar el responsable, la tarea o el plazo de un
+   compromiso en su línea.
+2. Guarde con git. En el mensaje diga qué y por qué, citando el minuto:
    `M12-C3: responsable es don Carlos («yo lo hago», 07:01)`.
-4. Corra `memo vault update`: regenera la breve con la corrección.
-5. **No use `memo publish --force` después de corregir a mano**: vuelve a generar la minuta y
+3. Corra `memo vault update`. La minuta manda: la breve y el PDF salen con la corrección; un
+   compromiso que borró pierde su nota (git guarda su historia); si cambió responsable, tarea
+   o plazo, su nota se actualiza sola. El estado y el seguimiento de cada nota no se tocan.
+4. **No use `memo publish --force` después de corregir a mano**: vuelve a generar la minuta y
    borra las correcciones. Solo sirve si se quiere rehacer la minuta desde cero.
 
 ### 3. Corregir un nombre en todas las minutas a la vez
@@ -499,6 +508,8 @@ def _apply_names_once(text: str, names: dict[str, str]) -> tuple[str, dict[tuple
 class UpdateResult:
     changed: list[Path] = field(default_factory=list)
     skipped: list[Path] = field(default_factory=list)  # had uncommitted edits: left alone
+    removed: list[Path] = field(default_factory=list)  # commitment notes no longer in a minuta
+    synced: list[Path] = field(default_factory=list)  # notes updated from their minuta
     names: dict[tuple[str, str], int] = field(default_factory=dict)
     committed: bool = False
     pushed: bool = False
@@ -548,6 +559,10 @@ def update(vault: Path, push: bool = True) -> UpdateResult:
                 _sync_published_hash(path, old, new)
         for pair, count in changes.items():
             result.names[pair] = result.names.get(pair, 0) + count
+    from crc_memo import views  # views reads the vault through this module
+    synced, result.removed = views.sync_commitments(vault, busy)
+    result.synced = synced
+    result.changed += [p for p in synced if p not in result.changed] + result.removed
     for minuta in minutas:
         breve = minuta.parent / output.BREVE_NAME
         if minuta in busy:
@@ -555,7 +570,7 @@ def update(vault: Path, push: bool = True) -> UpdateResult:
         old = breve.read_text() if breve.exists() else None
         if write_breve(minuta).read_text() != old:
             result.changed.append(breve)
-    from crc_memo import views  # views reads the vault through this module
+        pdf.write(minuta)  # gitignored: never committed, so not in `changed`
     changed, skipped = views.build(vault, busy)
     result.changed += changed
     result.skipped += skipped
@@ -563,7 +578,13 @@ def update(vault: Path, push: bool = True) -> UpdateResult:
     renames = dict.fromkeys((found.lower(), correct) for found, correct in sorted(result.names))
     first_form = {(f.lower(), c): f for f, c in sorted(result.names, reverse=True)}
     summary = ", ".join(f"{first_form[key]} → {key[1]}" for key in renames)
-    message = f"Nombres: {summary}" if summary else "Actualiza breves, índices y personas"
+    parts = [f"Nombres: {summary}"] if summary else []
+    if result.synced:
+        parts.append("compromisos actualizados: " +
+                     ", ".join(p.stem for p in result.synced))
+    if result.removed:
+        parts.append("quita " + ", ".join(p.stem for p in result.removed))
+    message = "; ".join(parts) or "Actualiza breves, índices y personas"
     publish_like = PublishResult(0, vault)
     commit_and_push(vault, message, result.changed, push, publish_like)
     result.committed, result.pushed, result.warning = (publish_like.committed, publish_like.pushed,
