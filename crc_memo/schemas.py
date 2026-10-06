@@ -36,7 +36,7 @@ QUOTE = "short literal quote from the transcript (max ~15 words) that supports t
 # --- 3a: what the LLM extracts from one chunk -------------------------------------
 
 class MeetingInfo(BaseModel):
-    group: Label = Field(description='group or organization meeting, e.g. "Asociación de Vecinos"; "" if not said')
+    group: Label = Field(description='the group or organization that met, as named; "" if not said')
     when: Label = Field(description='when the meeting happened, as spoken (e.g. "ayer"); "" if not said')
     place: Label = Field(description='where it happened, as spoken; "" if not said')
     chaired_by: Label = Field(description='who led the meeting; "" if not said')
@@ -234,7 +234,8 @@ class Overview(BaseModel):  # one call, from the developments + items (not the t
                     "messages (complaints, announcements, opinions)"
     )
     # Not a Label: maxLength cut a 60-character title mid-phrase ("…y la Asociación de").
-    title: Sentence = Field(description='name of the meeting in 3-8 words, e.g. "Reunión de la Asociación de Vecinos"')
+    # No example name here: the model copied "Reunión de la Asociación de Vecinos" verbatim.
+    title: Sentence = Field(description="3-8 words: which group met and its main subject")
     summary: Paragraph = Field(
         description="2-3 sentences: the most important outcomes, for someone who wasn't there"
     )

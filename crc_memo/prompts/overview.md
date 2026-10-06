@@ -7,8 +7,9 @@ meeting_recap.
 
 Below are the topics discussed (each with what was said about it) and the items extracted
 from the memo. From them, write:
-- title: 3–8 words, no dates. For a meeting recap, its name ("Reunión de la Asociación de
-  Vecinos"); otherwise what the audio is about ("Cuota para gastos de representación").
+- title: 3–8 words, no dates, built from the topics below. For a meeting recap: which group
+  met and its main subject; otherwise: what the audio is about. Never reuse wording from
+  these instructions.
 - summary: 2–3 sentences with what matters most to the readers — the main decisions and
   what is still open. Don't repeat every item: the minuta lists them right after.
 

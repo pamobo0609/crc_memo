@@ -120,3 +120,7 @@ Every key maps to something the minuta renders, plus traceability (Phase 4a):
 - Parked for 3e: completed actions extracted as commitments ("le pregunté…") — candidate
   `still_to_do` field in the owner check; awkward phrasing ("fueron recordados que deben…"); mild embellishment
   ("podría haber dificultades").
+- **Examples in prompts and schema descriptions get copied verbatim.** The overview call
+  titled a real meeting "Reunión de la Asociación de Vecinos" — the example in its own
+  prompt. Describe the format ("which group met and its main subject"), don't show a
+  copyable value.

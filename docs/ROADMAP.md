@@ -71,8 +71,10 @@ pushes; humans correct the markdown; ASCII PascalCase file names; sequential IDs
 - **4c** Names: ✅ `Propietarios.md` (one row per person: lote, phone, email) and `Externos.md`
   (everyone else), each with «También dicen» variants — the single source of truth for names;
   ✅ `memo vault update` applies them everywhere (never inside «quotes»), regenerates the breves,
-  skips files with uncommitted edits. Still to do: generated indexes (README,
-  `Compromisos/README.md`, `Personas/*.md` with Obsidian `aliases`), `memo vault check`.
+  skips files with uncommitted edits. ✅ Generated views (`views.py`, rebuilt by update and
+  publish): `Minutas/README.md`, `Compromisos/README.md` (open by person, closed by year),
+  `Personas/<Name>.md` (Obsidian `aliases`, contact, commitments, mentions). ✅
+  `memo vault check` (file:line; ✗ errors, ⚠ warnings).
 - **4d** PDF for the WhatsApp group via Typst, derived from `Minuta.md`.
 - **Done when:** a processed memo is published to the private repo with working links,
   commitment notes and indexes, and its PDF reads well on a phone.

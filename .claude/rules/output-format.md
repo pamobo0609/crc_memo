@@ -73,3 +73,9 @@ Los minutos [mm:ss] indican dónde verificarlo en el audio.*
   (`;`-separated) → `name_map()`; `apply_names()` replaces whole words, case-insensitive,
   longest first, never inside «quotes» or in Transcripcion.md. Applied on publish and by
   `memo vault update`, which skips files with uncommitted edits and commits only what it changed.
+- Generated views (`views.py`, rebuilt by `memo vault update` and `memo publish`, never
+  edited): `Minutas/README.md`, `Compromisos/README.md` (built from the commitment notes,
+  where status lives), `Personas/<FileName>.md` (Obsidian `aliases` from «También dicen»).
+  Dates only, never ages ("hace 12 días" would change every day). Stale person pages
+  (marked generated) are removed.
+- `memo vault check` (`views.check`): ✗ errors / ⚠ warnings as file:line.

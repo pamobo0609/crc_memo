@@ -241,6 +241,8 @@ def publish(folder: Path, vault: Path, force: bool = False, push: bool = True) -
     ingest.update_meta(folder, published={"number": number, "path": str(target.relative_to(vault)),
                                           "sha256": _sha(text)})
 
+    from crc_memo import views  # views reads the vault through this module
+    written += views.build(vault, uncommitted(vault))[0]
     result = PublishResult(number, target, created)
     commit_and_push(vault, f"M{number} — minuta del {memo_date}", [*written, *created], push,
                     result)
@@ -267,6 +269,9 @@ de audios de WhatsApp y revisadas por personas. **Repositorio privado.**
 - `Externos.md`: las demás personas e instituciones que aparecen en los audios.
 - `Configuracion.md`: ajustes de esta bóveda, por ejemplo cómo llamar a quienes reciben los
   audios (`destinatarios`, el nombre del grupo).
+- Generados (**no los edite**, se reescriben solos): `Minutas/README.md` (todas las minutas),
+  `Compromisos/README.md` (abiertos por persona, cerrados por año) y `Personas/` (una página
+  por persona de las tablas, con sus datos, compromisos y las minutas donde aparece).
 
 ## Cómo actualizar, paso a paso
 Los comandos `memo …` se corren en una terminal, desde la carpeta de crc_memo, con
@@ -317,8 +322,16 @@ git add -A && git commit -m "qué cambió y por qué" && git push   # dentro de 
 1. En `Configuracion.md`, cambie `destinatarios` (por ejemplo `Vecinos del barrio`).
 2. Guarde con git y corra `memo vault update`.
 
+### 6. Revisar que todo esté en orden
+`memo vault check` revisa lo que se edita a mano y muestra cada problema con su archivo y
+línea: ✗ = hay que corregirlo (un estado mal escrito, un correo inválido, un compromiso sin
+nota); ⚠ = vale la pena mirarlo (un responsable que no está en las tablas, un compromiso
+cerrado sin fecha). Córralo después de editar a mano.
+
 ### Reglas de oro
 - Guarde con git **antes** de `memo vault update`: los archivos sin guardar se saltan.
+- No edite los archivos generados (`README.md` de Minutas y Compromisos, `Personas/`):
+  corrija la fuente (la minuta, la nota del compromiso o las tablas) y corra `memo vault update`.
 - Nunca edite `MinutaBreve.md` ni `Transcripcion.md`, ni cambie las citas «…».
 - No renombre carpetas ni reutilice números: el código M12-C3 es para siempre.
 
@@ -389,23 +402,25 @@ def _plain_header(text: str) -> str:
 
 
 def read_table(path: Path) -> list[dict[str, str]]:
-    """The first markdown table in a file, as rows keyed by plain header ('tambien dicen').
-    Columns can be reordered or added; `\\|` is a literal bar. Missing file: no rows."""
+    """The first markdown table in a file, as rows keyed by plain header ('tambien dicen'),
+    plus "_line" (its line number, for error messages). Columns can be reordered or added;
+    `\\|` is a literal bar. Missing file: no rows."""
     if not path.exists():
         return []
-    rows: list[list[str]] = []
-    for line in path.read_text().splitlines():
+    rows: list[tuple[int, list[str]]] = []
+    for number, line in enumerate(path.read_text().splitlines(), 1):
         line = line.strip()
         if line.startswith("|"):
             cells = [c.strip().replace("\\|", "|")
                      for c in re.split(r"(?<!\\)\|", line.strip("|"))]
-            rows.append(cells)
+            rows.append((number, cells))
         elif rows:
             break  # the table ended
     if len(rows) < 2:
         return []
-    header = [_plain_header(h) for h in rows[0]]
-    return [dict(zip(header, cells)) for cells in rows[2:] if any(cells)]
+    header = [_plain_header(h) for h in rows[0][1]]
+    return [dict(zip(header, cells)) | {"_line": str(number)}
+            for number, cells in rows[2:] if any(cells)]
 
 
 def _name_rows(vault: Path) -> list[tuple[str, str, list[str]]]:
@@ -540,11 +555,15 @@ def update(vault: Path, push: bool = True) -> UpdateResult:
         old = breve.read_text() if breve.exists() else None
         if write_breve(minuta).read_text() != old:
             result.changed.append(breve)
+    from crc_memo import views  # views reads the vault through this module
+    changed, skipped = views.build(vault, busy)
+    result.changed += changed
+    result.skipped += skipped
     # One entry per rename, whatever the capitalization it was found in ("Quienes…"/"quienes…").
     renames = dict.fromkeys((found.lower(), correct) for found, correct in sorted(result.names))
     first_form = {(f.lower(), c): f for f, c in sorted(result.names, reverse=True)}
     summary = ", ".join(f"{first_form[key]} → {key[1]}" for key in renames)
-    message = f"Nombres: {summary}" if summary else "Actualiza minutas breves"
+    message = f"Nombres: {summary}" if summary else "Actualiza breves, índices y personas"
     publish_like = PublishResult(0, vault)
     commit_and_push(vault, message, result.changed, push, publish_like)
     result.committed, result.pushed, result.warning = (publish_like.committed, publish_like.pushed,

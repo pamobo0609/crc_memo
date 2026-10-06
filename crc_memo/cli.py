@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from crc_memo import config, ingest, output, summarize, transcribe, vault
+from crc_memo import config, ingest, output, summarize, transcribe, vault, views
 from crc_memo.schemas import Prose
 
 app = typer.Typer(
@@ -344,6 +344,28 @@ def vault_update(
         console.print(f"[yellow]⚠ skipped {path.name}: it has uncommitted changes. Commit them, "
                       "then run this again.[/yellow]")
     _report_git(result)
+
+
+@vault_app.command("check")
+def vault_check() -> None:
+    """Check what people edit in the vault: minutas, commitment notes, Propietarios.md and
+    Externos.md. Problems are listed as file:line; ⚠ ones are worth a look."""
+    try:
+        root = vault.vault_dir()
+    except vault.VaultError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    result = views.check(root)
+    for problem in result.problems:
+        mark = "[yellow]⚠[/yellow]" if problem.warning else "[red]✗[/red]"
+        console.print(f"{mark} {escape(problem.show(root))}")
+    warnings = len(result.problems) - len(result.errors)
+    if not result.problems:
+        console.print("[green]All good[/green]")
+    else:
+        console.print(f"{len(result.errors)} errors, {warnings} warnings")
+    if result.errors:
+        raise typer.Exit(1)
 
 
 @app.command("list")

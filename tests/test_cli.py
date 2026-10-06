@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-from crc_memo import config, ingest, summarize, transcribe, vault
+from crc_memo import config, ingest, summarize, transcribe, vault, views
 from crc_memo.cli import app
 
 runner = CliRunner()
@@ -397,3 +397,23 @@ def test_a_push_without_a_commit_says_nothing_changed(vault_dir, monkeypatch):
     monkeypatch.setattr(vault, "update", lambda path, push: vault.UpdateResult(pushed=True))
     output = runner.invoke(app, ["vault", "update"]).output
     assert "nothing changed" in output and "committed" not in output
+
+
+@pytest.mark.parametrize("problems, code, expected", [
+    ([], 0, "All good"),
+    ([("Propietarios.md", 3, "fila sin nombre", False)], 1, "✗ Propietarios.md:3: fila sin nombre"),
+    ([("Compromisos/2026/M1-C1.md", 6, "«X» no está", True)], 0, "0 errors, 1 warnings"),
+])
+def test_vault_check(vault_dir, monkeypatch, problems, code, expected):
+    result_of = views.CheckResult([views.Problem(vault_dir / f, line, msg, warn)
+                                   for f, line, msg, warn in problems])
+    monkeypatch.setattr(views, "check", lambda root: result_of)
+    result = runner.invoke(app, ["vault", "check"])
+    assert result.exit_code == code
+    assert expected in " ".join(result.output.split())
+
+
+def test_vault_check_without_vault(monkeypatch):
+    monkeypatch.delenv("CRC_MEMO_VAULT", raising=False)
+    result = runner.invoke(app, ["vault", "check"])
+    assert result.exit_code == 1 and "Set CRC_MEMO_VAULT" in result.output

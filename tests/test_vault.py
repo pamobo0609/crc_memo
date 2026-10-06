@@ -1,6 +1,7 @@
 import json
 import subprocess
 from datetime import date
+from pathlib import Path
 
 import pytest
 import yaml
@@ -34,6 +35,13 @@ def repo(tmp_path):
     git(path, "commit", "--quiet", "--allow-empty", "-m", "init")
     git(path, "push", "--quiet", "-u", "origin", "HEAD")
     return path
+
+
+def authored(paths, root):
+    """The files a test cares about: what was changed besides the generated views
+    (README indexes and Personas/ pages, covered in test_views.py)."""
+    return sorted(p.relative_to(root).as_posix() for p in paths
+                  if p.name != "README.md" and "Personas" not in p.relative_to(root).parts)
 
 
 def make_memo(tmp_path, name="memo", sha="f00", memo_date="2026-09-27", **changes):
@@ -122,6 +130,7 @@ def test_publish_numbers_writes_commits_and_pushes(repo, tmp_path):
         ["M1-C1.md", "M1-C2.md", "M1-C3.md", "M1-C4.md"]
     assert git(repo, "log", "-1", "--format=%s") == "M1 — minuta del 2026-09-27"
     assert git(repo, "status", "--porcelain") == ""
+    assert vault.update(repo).committed is False  # publish already built every view
     assert git(repo, "rev-parse", "HEAD") == git(repo, "rev-parse", "@{u}")  # pushed
 
     second = vault.publish(make_memo(tmp_path, "otro", sha="bar", memo_date="2026-10-05"), repo)
@@ -309,7 +318,7 @@ def test_publish_never_commits_someone_elses_work_in_progress(repo, tmp_path):
         "D\tMinutas/2026/M1-2026-09-27/Minuta.md", "D\tMinutas/2026/M1-2026-09-27/MinutaBreve.md",
         "D\tMinutas/2026/M1-2026-09-27/Transcripcion.md",
         "A\tMinutas/2026/M1-2026-09-28/Minuta.md", "A\tMinutas/2026/M1-2026-09-28/MinutaBreve.md",
-        "A\tMinutas/2026/M1-2026-09-28/Transcripcion.md"])
+        "A\tMinutas/2026/M1-2026-09-28/Transcripcion.md", "M\tMinutas/README.md"])
 
 
 
@@ -346,7 +355,8 @@ def test_read_table(tmp_path):
     assert rows[0]["notas"] == "tesorera | fundadora"  # escaped bar
     assert len(rows) == 3  # the empty row is skipped
     assert vault.read_table(tmp_path / "Externos.md")[1] == \
-        {"rol": "institución", "nombre": "el ICE", "tambien dicen": "Elise; élice"}
+        {"rol": "institución", "nombre": "el ICE", "tambien dicen": "Elise; élice", "_line": "4"}
+    assert rows[0]["_line"] == "5"
     assert vault.read_table(tmp_path / "missing.md") == []
     (tmp_path / "x.md").write_text("| solo encabezado |\n")
     assert vault.read_table(tmp_path / "x.md") == []
@@ -400,9 +410,10 @@ def test_update_fixes_names_everywhere_once(repo, tmp_path, monkeypatch):
     result = vault.update(repo)
 
     assert result.names[("Doña Rosa", "Doña Rosa Pérez")] >= 2
-    assert sorted(p.relative_to(repo).as_posix() for p in result.changed) == [
+    assert authored(result.changed, repo) == [
         "Compromisos/2026/M1-C1.md", "Minutas/2026/M1-2026-09-27/Minuta.md",
         "Minutas/2026/M1-2026-09-27/MinutaBreve.md"]
+    assert (repo / "Personas/DonaRosaPerez.md").exists()
     assert "· Doña Rosa Pérez · Cotizar" in (first.minuta.parent / "MinutaBreve.md").read_text()
     assert (result.committed, result.pushed) == (True, True)
     assert git(repo, "log", "-1", "--format=%s") == \
@@ -424,7 +435,8 @@ def test_update_regenerates_a_missing_breve(tmp_path, monkeypatch):
     (result.minuta.parent / "MinutaBreve.md").unlink()
     write_names(plain)  # this minuta's memo isn't on this machine: nothing to sync
     meta_free = vault.update(plain)
-    assert sorted(p.name for p in meta_free.changed) == ["M1-C1.md", "Minuta.md", "MinutaBreve.md"]
+    assert [Path(p).name for p in authored(meta_free.changed, plain)] == \
+        ["M1-C1.md", "Minuta.md", "MinutaBreve.md"]
     assert "not a git repo" in meta_free.warning
 
 
@@ -453,7 +465,7 @@ def test_update_skips_files_with_uncommitted_edits(repo, tmp_path, monkeypatch):
     result = vault.update(repo)
 
     assert sorted(p.name for p in result.skipped) == ["M1-C1.md", "Minuta.md"]
-    assert result.changed == [] and not result.committed
+    assert authored(result.changed, repo) == []
     assert "Doña Rosa ·" in note.read_text()  # untouched until it's committed
     assert vault.uncommitted(tmp_path / "not-a-repo") == set()
 
@@ -500,3 +512,12 @@ def test_apply_names_stops_on_a_cycle():
     # name_map() never builds a cycle (a variant can't point to two names); the cap is a guard.
     text, changes = vault.apply_names("a", {"a": "b", "b": "a"})
     assert text in {"a", "b"} and sum(changes.values()) == 10
+
+
+def test_update_without_renames_says_what_it_rebuilt(repo, tmp_path):
+    vault.publish(make_memo(tmp_path), repo)
+    note = repo / "Compromisos/2026/M1-C1.md"
+    note.write_text(note.read_text().replace("estado: abierto", "estado: cumplido"))
+    git(repo, "commit", "--quiet", "-am", "M1-C1 cumplido")
+    assert vault.update(repo).committed
+    assert git(repo, "log", "-1", "--format=%s") == "Actualiza breves, índices y personas"

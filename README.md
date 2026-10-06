@@ -113,6 +113,8 @@ uv run memo process              # no path → opens the macOS file picker
 | `memo reprocess ID [--from extract\|merge\|write\|render]` | Re-run summarization (after changing a prompt or model). Previous outputs are kept in the memo's `history/`. `--sender`/`--date` alone only re-render. | ✅ |
 | `memo vault init PATH` | Create an empty vault (Spanish README, templates, git repo) — see below | ✅ |
 | `memo publish ID [--no-push] [--force]` | Number the minuta (M12), write it + transcript + one note per commitment into your vault, commit and push | ✅ |
+| `memo vault update [--no-push]` | Apply the name tables everywhere (never inside «quotes»), rebuild the short minutas, indexes and person pages, commit and push | ✅ |
+| `memo vault check` | Check what people edit (minutas, commitment notes, name tables); problems as file:line | ✅ |
 
 ## Where your data lives
 
@@ -151,7 +153,9 @@ MinutasVault/
 │   ├── Minuta.md                   ← every item: code (M12-C3) + [mm:ss] «exact quote»
 │   └── Transcripcion.md            ← the evidence every [mm:ss] points to
 ├── Compromisos/2026/M12-C3.md      ← one note per commitment: estado + seguimiento
-└── Minutas/…/MinutaBreve.md         ← the short minuta for the group, derived from Minuta.md
+├── Minutas/…/MinutaBreve.md         ← the short minuta for the group, derived from Minuta.md
+├── Minutas/README.md, Compromisos/README.md   ← generated indexes (open commitments by person)
+└── Personas/RosaPerez.md           ← generated page per person: contact, commitments, mentions
 ```
 
 The audio never goes to the vault (only its SHA-256, so anyone can check which recording a
